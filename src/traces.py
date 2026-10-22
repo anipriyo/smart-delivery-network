@@ -3,13 +3,18 @@
 Kept separate from the tested core implementations (convex_hull.py,
 closest_pair.py, kdtree.py) so the teaching output can never affect
 correctness -- these mirror the same logic but log every decision instead
-of only returning the final answer.
+of only returning the final answer. Coordinates are km, so distances are
+shown in metres.
 """
 
 import math
 
 from .kdtree import KDTree
 from .models import Point
+
+
+def fmt_dist(km: float) -> str:
+    return f"{km * 1000:.0f} m" if km < 1 else f"{km:.2f} km"
 
 
 def convex_hull_trace(points: list[Point]) -> tuple[list[Point], list[dict]]:
@@ -26,16 +31,17 @@ def convex_hull_trace(points: list[Point]) -> tuple[list[Point], list[dict]]:
         for p in seq:
             while len(hull) >= 2 and cross(hull[-2], hull[-1], p) <= 0:
                 popped = hull.pop()
-                prev_id = hull[-1].id if hull else "-"
+                prev = hull[-1].label if hull else "-"
                 steps.append({
                     "chain": chain, "action": "pop", "point": popped.id,
-                    "detail": f"P{prev_id} -> P{popped.id} -> P{p.id} is not a left turn, drop P{popped.id}",
-                    "snapshot": [q.id for q in hull], "current": p.id,
+                    "detail": f"{prev} → {popped.label} → {p.label} is not a left turn, so {popped.label} "
+                              f"cannot be on the boundary: drop it",
+                    "snapshot": [q.id for q in hull], "current": p.id, "popped": popped.id,
                 })
             hull.append(p)
             steps.append({
                 "chain": chain, "action": "push", "point": p.id,
-                "detail": f"add P{p.id} to the {chain} chain",
+                "detail": f"add {p.label} to the {chain} chain",
                 "snapshot": [q.id for q in hull], "current": p.id,
             })
         return hull
@@ -61,8 +67,8 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
                     best = (pts[i], pts[j], d)
         steps.append({
             "depth": depth, "event": "base case",
-            "detail": f"{len(pts)} points ({', '.join('P' + str(p.id) for p in pts)}) -> "
-                      f"brute force best P{best[0].id}-P{best[1].id} = {best[2]:.2f}",
+            "detail": f"{len(pts)} points ({', '.join(p.label for p in pts)}): brute force gives "
+                      f"{best[0].label}–{best[1].label} = {fmt_dist(best[2])}",
             "active_ids": [p.id for p in pts], "best": (best[0].id, best[1].id, best[2]),
         })
         return best
@@ -77,9 +83,8 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
         left, right = pts[:mid], pts[mid:]
         steps.append({
             "depth": depth, "event": "divide",
-            "detail": f"split {n} points at x = {mid_x:.1f}: left = "
-                      f"{{{', '.join('P' + str(p.id) for p in left)}}}, "
-                      f"right = {{{', '.join('P' + str(p.id) for p in right)}}}",
+            "detail": f"split {n} points at x = {mid_x:.2f} km into {len(left)} on the left "
+                      f"and {len(right)} on the right",
             "active_ids": [p.id for p in pts], "split_x": mid_x,
             "left_ids": [p.id for p in left], "right_ids": [p.id for p in right],
         })
@@ -89,8 +94,8 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
         best = best_left if best_left[2] <= best_right[2] else best_right
         steps.append({
             "depth": depth, "event": "combine",
-            "detail": f"left best = {best_left[2]:.2f}, right best = {best_right[2]:.2f}, "
-                      f"delta = {best[2]:.2f}",
+            "detail": f"left best = {fmt_dist(best_left[2])}, right best = {fmt_dist(best_right[2])}, "
+                      f"so δ = {fmt_dist(best[2])}",
             "active_ids": [p.id for p in pts], "split_x": mid_x,
             "best": (best[0].id, best[1].id, best[2]),
         })
@@ -108,10 +113,10 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
                     improved = True
         steps.append({
             "depth": depth, "event": "strip check",
-            "detail": f"{len(strip)} point(s) within {best[2]:.2f} of the split line checked, "
-                      + ("found a closer cross-boundary pair" if improved else "no improvement, delta stands")
-                      + f" -> best P{best[0].id}-P{best[1].id} = {best[2]:.2f}",
-            "active_ids": [p.id for p in pts], "split_x": mid_x,
+            "detail": f"{len(strip)} point(s) lie within δ of the split line; "
+                      + ("a closer pair crosses the line" if improved else "none beats δ")
+                      + f", best is {best[0].label}–{best[1].label} = {fmt_dist(best[2])}",
+            "active_ids": [p.id for p in pts], "split_x": mid_x, "delta": best[2],
             "strip_ids": [p.id for p in strip], "best": (best[0].id, best[1].id, best[2]),
         })
         return best
@@ -121,7 +126,10 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
     return result, steps
 
 
-def kdtree_build_trace(points: list[Point], bounds: tuple[float, float, float, float] = (0.0, 100.0, 0.0, 100.0)) -> list[dict]:
+def kdtree_build_trace(
+    points: list[Point], bounds: tuple[float, float, float, float] = (0.0, 100.0, 0.0, 100.0)
+) -> list[dict]:
+    """``bounds`` is (x_min, x_max, y_min, y_max) of the area being split."""
     steps: list[dict] = []
 
     def build(pts: list[Point], depth: int, box: tuple[float, float, float, float]) -> None:
@@ -141,8 +149,8 @@ def kdtree_build_trace(points: list[Point], bounds: tuple[float, float, float, f
         steps.append({
             "depth": depth, "axis": "x" if axis == 0 else "y",
             "median_point": median.id, "n_points": len(pts), "seg": seg,
-            "detail": f"depth {depth}, split on {'x' if axis == 0 else 'y'}: "
-                      f"median of {len(pts)} point(s) is P{median.id} ({median.x:.1f}, {median.y:.1f})",
+            "detail": f"depth {depth}: split {len(pts)} point(s) on {'x (west/east)' if axis == 0 else 'y (south/north)'} "
+                      f"at the median, {median.label}",
         })
         build(pts[:mid], depth + 1, left_box)
         build(pts[mid + 1:], depth + 1, right_box)
@@ -168,8 +176,7 @@ def kdtree_query_trace(
             found.append(node.point)
         steps.append({
             "depth": depth, "point": node.point.id, "in_box": hit,
-            "detail": f"visit P{node.point.id} ({node.point.x:.1f}, {node.point.y:.1f}) -> "
-                      + ("inside box, report it" if hit else "outside box, keep searching"),
+            "detail": f"visit {node.point.label}: " + ("inside the area, report it" if hit else "outside the area"),
         })
 
         if node.axis == 0:
@@ -179,10 +186,13 @@ def kdtree_query_trace(
 
         go_left = lo <= val
         go_right = hi >= val
+        side = ("west", "east") if node.axis == 0 else ("south", "north")
         if not go_left:
-            steps.append({"depth": depth + 1, "pruned": True, "detail": f"prune left subtree of P{node.point.id}: entirely outside the query box"})
+            steps.append({"depth": depth + 1, "pruned": True, "point": node.point.id,
+                          "detail": f"skip everything {side[0]} of {node.point.label}: the area cannot reach it"})
         if not go_right:
-            steps.append({"depth": depth + 1, "pruned": True, "detail": f"prune right subtree of P{node.point.id}: entirely outside the query box"})
+            steps.append({"depth": depth + 1, "pruned": True, "point": node.point.id,
+                          "detail": f"skip everything {side[1]} of {node.point.label}: the area cannot reach it"})
 
         if go_left:
             search(node.left, depth + 1)
@@ -194,9 +204,12 @@ def kdtree_query_trace(
 
 
 def voronoi_assignment_trace(customer: Point, warehouses: list[Point]) -> list[dict]:
-    rows = [
-        {"warehouse": w.id, "distance": math.hypot(w.x - customer.x, w.y - customer.y)}
-        for w in warehouses
-    ]
-    rows.sort(key=lambda r: r["distance"])
+    """Compare the customer with each warehouse in turn, keeping the nearest so far."""
+    rows: list[dict] = []
+    best: tuple[int, float] | None = None
+    for w in warehouses:
+        d = math.hypot(w.x - customer.x, w.y - customer.y)
+        if best is None or d < best[1]:
+            best = (w.id, d)
+        rows.append({"warehouse": w.id, "distance": d, "best_so_far": best[0], "best_distance": best[1]})
     return rows

@@ -17,6 +17,26 @@ def customers_within_radius(site: Point, customers: list[Point], radius: float) 
     }
 
 
+def greedy_cover(universe: set, sets: dict) -> list[tuple[object, set]]:
+    """Plain greedy set cover over named sets.
+
+    Returns the picks in order as (name, newly covered elements). Stops when
+    everything is covered or no remaining set adds anything new. Ties go to
+    the set listed first.
+    """
+    covered: set = set()
+    remaining = dict(sets)
+    picks: list[tuple[object, set]] = []
+    while covered != universe and remaining:
+        best = max(remaining, key=lambda k: len((remaining[k] & universe) - covered))
+        new = (remaining.pop(best) & universe) - covered
+        if not new:
+            break  # no candidate can cover anything new
+        covered |= new
+        picks.append((best, new))
+    return picks
+
+
 def greedy_set_cover(
     candidates: list[Point],
     customers: list[Point],
@@ -24,30 +44,18 @@ def greedy_set_cover(
 ) -> tuple[list[Point], list[dict]]:
     """Return (chosen_sites, rounds) where rounds logs each pick for display.
 
+    Each candidate covers the customers within ``radius`` (km).
     Each round dict: {"site": Point, "new_covered": set[int], "total_covered": int}
     """
-    universe = {c.id for c in customers}
+    by_id = {cand.id: cand for cand in candidates}
     coverage = {cand.id: customers_within_radius(cand, customers, radius) for cand in candidates}
+    picks = greedy_cover({c.id for c in customers}, coverage)
 
-    covered: set[int] = set()
     chosen: list[Point] = []
     rounds: list[dict] = []
-    remaining = {cand.id: cand for cand in candidates}
-
-    while covered != universe and remaining:
-        best_id = max(remaining, key=lambda cid: len(coverage[cid] - covered))
-        new_covered = coverage[best_id] - covered
-        if not new_covered:
-            break  # no candidate can cover anything new
-        covered |= new_covered
-        chosen.append(remaining[best_id])
-        rounds.append(
-            {
-                "site": remaining[best_id],
-                "new_covered": new_covered,
-                "total_covered": len(covered),
-            }
-        )
-        del remaining[best_id]
-
+    total = 0
+    for site_id, new in picks:
+        total += len(new)
+        chosen.append(by_id[site_id])
+        rounds.append({"site": by_id[site_id], "new_covered": new, "total_covered": total})
     return chosen, rounds

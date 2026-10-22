@@ -6,7 +6,9 @@ from src.closest_pair import closest_pair
 from src.convex_hull import convex_hull
 from src.kdtree import KDTree
 from src.models import Point
-from src.set_cover import greedy_set_cover
+from src.set_cover import greedy_cover, greedy_set_cover
+from src.traces import closest_pair_trace, convex_hull_trace, kdtree_query_trace, voronoi_assignment_trace
+from src.voronoi import nearest_warehouse
 
 
 def _rand_points(n, seed):
@@ -84,3 +86,40 @@ def test_greedy_set_cover_covers_everything_possible():
         covered |= r["new_covered"]
     assert covered == {c.id for c in customers}
     assert len(chosen) <= len(candidates)
+
+
+def test_greedy_cover_matches_overview_worked_example():
+    # Overview PDF, page 3: four candidate sites, nine customers.
+    sets = {
+        "W1": {1, 2, 3, 4},
+        "W2": {3, 4, 5, 6, 7},
+        "W3": {6, 7, 8},
+        "W4": {1, 2, 8, 9},
+    }
+    picks = greedy_cover(set(range(1, 10)), sets)
+    assert [name for name, _ in picks] == ["W2", "W4"]
+    assert picks[0][1] == {3, 4, 5, 6, 7}
+    assert picks[1][1] == {1, 2, 8, 9}
+
+
+def test_greedy_cover_stops_when_nothing_new():
+    picks = greedy_cover({1, 2, 3}, {"A": {1}, "B": {1}})
+    assert picks == [("A", {1})]
+
+
+def test_traces_agree_with_core_algorithms():
+    points = _rand_points(40, seed=11)
+    hull, _ = convex_hull_trace(points)
+    assert hull == convex_hull(points)
+    (p, q, d), _ = closest_pair_trace(points)
+    assert math.isclose(d, closest_pair(points)[2])
+    tree = KDTree(points)
+    found, _ = kdtree_query_trace(tree, 20, 60, 30, 70)
+    assert set(found) == set(tree.range_query(20, 60, 30, 70))
+
+
+def test_voronoi_trace_ends_at_nearest_warehouse():
+    hubs = [Point(i + 1, x, y, "warehouse") for i, (x, y) in enumerate([(0, 0), (10, 0), (5, 9)])]
+    c = Point(1, 6, 1, "customer")
+    rows = voronoi_assignment_trace(c, hubs)
+    assert rows[-1]["best_so_far"] == nearest_warehouse(c, hubs).id == 2

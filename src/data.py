@@ -1,56 +1,149 @@
-"""Point-set generation: reproducible random data and a fixed demo set."""
+"""Point sets for the dashboard: random real places of Kalyani from
+OpenStreetMap, or a user CSV of latitude/longitude points.
+"""
 
+from __future__ import annotations
+
+import io
+import math
 import random
+from dataclasses import dataclass
 
+import pandas as pd
+from shapely.geometry import MultiPoint, Polygon
+
+from .geo import City, LocalProjection
 from .models import Point
 
 
-def generate_random(
+@dataclass
+class Network:
+    """Everything the algorithms and the map need about one point set."""
+
+    title: str
+    warehouses: list[Point]
+    customers: list[Point]
+    projection: LocalProjection
+    region: Polygon  # area in km that service zones are clipped to
+    boundary_lonlat: list[tuple[float, float]] | None  # city outline to draw, if any
+
+    @property
+    def bounds_xy(self) -> tuple[float, float, float, float]:
+        x0, y0, x1, y1 = self.region.bounds
+        return (x0, x1, y0, y1)
+
+
+def _to_point(row: dict, pid: int, kind: str) -> Point:
+    return Point(
+        id=pid, x=row["x"], y=row["y"], kind=kind, name=row["name"],
+        lat=row["lat"], lon=row["lon"], category=row.get("kind", ""),
+    )
+
+
+def sample_network(
+    city: City,
     n_warehouses: int = 5,
-    n_customers: int = 40,
-    width: float = 100.0,
-    height: float = 100.0,
+    n_customers: int = 60,
     seed: int = 42,
-) -> tuple[list[Point], list[Point]]:
-    rng = random.Random(seed)
-    warehouses = [
-        Point(id=i, x=round(rng.uniform(0, width), 2), y=round(rng.uniform(0, height), 2), kind="warehouse")
-        for i in range(n_warehouses)
-    ]
-    customers = [
-        Point(
-            id=n_warehouses + i,
-            x=round(rng.uniform(0, width), 2),
-            y=round(rng.uniform(0, height), 2),
-            kind="customer",
-        )
-        for i in range(n_customers)
-    ]
-    return warehouses, customers
+) -> Network:
+    """Pick random real places of the city as warehouses and customers.
 
-
-def demo_set() -> tuple[list[Point], list[Point]]:
-    """A fixed, hand-picked 5 warehouse / 30 customer layout with a clear
-    hull, visibly separated Voronoi regions, and an obvious closest pair --
-    good for screenshots and live demos where randomness is unwelcome.
+    Warehouses come first from places OSM tags as warehouses, industrial,
+    commercial or postal sites, then from any place, and must sit at least a
+    minimum gap apart so the service zones are not degenerate. Customers are a
+    uniform random sample of the remaining places. The same seed always gives
+    the same network.
     """
-    warehouses = [
-        Point(0, 20, 80, "warehouse"),
-        Point(1, 75, 85, "warehouse"),
-        Point(2, 50, 50, "warehouse"),
-        Point(3, 15, 20, "warehouse"),
-        Point(4, 85, 20, "warehouse"),
+    rng = random.Random(seed)
+    places = list(city.places)
+    tagged = [p for p in places if p["warehouse_candidate"]]
+    others = [p for p in places if not p["warehouse_candidate"]]
+    rng.shuffle(tagged)
+    rng.shuffle(others)
+    pool = tagged + others
+
+    gap = 0.55 * math.sqrt(city.area_km2 / max(n_warehouses, 1))
+    hubs: list[dict] = []
+    while len(hubs) < n_warehouses and gap > 0.05:
+        for p in pool:
+            if len(hubs) == n_warehouses:
+                break
+            if p in hubs:
+                continue
+            if all(math.hypot(p["x"] - h["x"], p["y"] - h["y"]) >= gap for h in hubs):
+                hubs.append(p)
+        gap *= 0.8  # relax the spacing if the city ran out of far-apart places
+
+    hub_ids = {h["osm_id"] for h in hubs}
+    rest = [p for p in places if p["osm_id"] not in hub_ids]
+    rng.shuffle(rest)
+    chosen: list[dict] = []
+    taken: set[tuple[float, float]] = set()
+    for p in rest:
+        key = (round(p["x"], 3), round(p["y"], 3))  # ~1 m grid: skip duplicates
+        if key in taken:
+            continue
+        taken.add(key)
+        chosen.append(p)
+        if len(chosen) == n_customers:
+            break
+
+    warehouses = [_to_point(h, i + 1, "warehouse") for i, h in enumerate(hubs)]
+    customers = [_to_point(c, i + 1, "customer") for i, c in enumerate(chosen)]
+    return Network(
+        title=city.name,
+        warehouses=warehouses,
+        customers=customers,
+        projection=city.projection,
+        region=city.boundary_xy,
+        boundary_lonlat=city.boundary_lonlat,
+    )
+
+
+def network_from_csv(file) -> Network:
+    """Build a network from a CSV with columns type, lat, lon and optional name.
+
+    ``type`` is ``warehouse`` or ``customer``. The flat km plane is centred on
+    the uploaded points, so any city works.
+    """
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower() for c in df.columns]
+    missing = {"type", "lat", "lon"} - set(df.columns)
+    if missing:
+        raise ValueError(f"CSV is missing column(s): {', '.join(sorted(missing))}")
+    if "name" not in df.columns:
+        df["name"] = ""
+    df = df.dropna(subset=["lat", "lon"])
+    df["type"] = df["type"].astype(str).str.strip().str.lower()
+    proj = LocalProjection(lat0=float(df["lat"].min()), lon0=float(df["lon"].min()))
+
+    warehouses: list[Point] = []
+    customers: list[Point] = []
+    for _, r in df.iterrows():
+        x, y = proj.to_xy(float(r["lat"]), float(r["lon"]))
+        is_wh = r["type"] == "warehouse"
+        bucket = warehouses if is_wh else customers
+        bucket.append(Point(
+            id=len(bucket) + 1, x=x, y=y, kind="warehouse" if is_wh else "customer",
+            name=str(r["name"]) if pd.notna(r["name"]) else "",
+            lat=float(r["lat"]), lon=float(r["lon"]),
+        ))
+    if not warehouses or len(customers) < 2:
+        raise ValueError("CSV needs at least 1 warehouse and 2 customers")
+
+    hull = MultiPoint([p.coords() for p in warehouses + customers]).convex_hull
+    region = hull.buffer(0.15 * math.sqrt(max(hull.area, 1.0)) + 0.3)
+    return Network(
+        title="Uploaded network", warehouses=warehouses, customers=customers,
+        projection=proj, region=region, boundary_lonlat=None,
+    )
+
+
+def network_to_csv(net: Network) -> str:
+    buf = io.StringIO()
+    rows = [
+        {"type": p.kind, "label": p.label, "name": p.name, "lat": p.lat, "lon": p.lon, "category": p.category}
+        for p in net.warehouses + net.customers
     ]
-    customer_coords = [
-        (5, 90), (12, 75), (18, 95), (25, 88), (8, 60),
-        (65, 95), (72, 78), (80, 92), (88, 82), (60, 70),
-        (45, 60), (50, 45), (55, 55), (40, 48), (48, 38),
-        (10, 25), (18, 10), (25, 30), (5, 15), (22, 18),
-        (78, 15), (90, 25), (82, 5), (95, 18), (70, 10),
-        (35, 75), (60, 25), (30, 55), (65, 45), (40, 15),
-    ]
-    customers = [
-        Point(id=5 + i, x=float(x), y=float(y), kind="customer")
-        for i, (x, y) in enumerate(customer_coords)
-    ]
-    return warehouses, customers
+    pd.DataFrame(rows).to_csv(buf, index=False)
+    return buf.getvalue()
