@@ -151,8 +151,8 @@ need internet.
 | # | Algorithm | Question Answered | Technique | Complexity |
 |---|-----------|--------------------|-----------|------------|
 | 1 | Convex hull (Andrew's monotone chain, a Graham-scan variant) | How far does the network reach? | Sort points by (x, y), build the lower and upper chains by popping any point that makes a non-left turn | O(n log n) |
-| 2 | Closest pair (divide and conquer), region-wide and per zone | Which two stops are nearest each other? | Split by x-median, recurse on both halves, then scan only the thin strip around the dividing line for a closer cross-pair | O(n log² n) as written, O(n log n) with y-presorting; brute force is O(n²) |
-| 3 | KD-tree + range search | Which customers lie inside this rectangle? | Build a binary tree over customers alternating x/y median splits; a range query skips whole subtrees that cannot meet the query box | Build O(n log² n) as written; query O(√n + k) |
+| 2 | Closest pair (divide and conquer), region-wide and per zone | Which two stops are nearest each other? | Split by x-median, recurse on both halves, then scan only the thin strip around the dividing line for a closer cross-pair | O(n log n); brute force is O(n²) |
+| 3 | KD-tree + range search | Which customers lie inside this rectangle? | Build a binary tree over customers alternating x/y median splits; a range query skips whole subtrees that cannot meet the query box | Build O(n log n); query O(√n + k) |
 | 4 | Voronoi diagram | Which warehouse is nearest to each part of the area? | Cells from scipy/Qhull, clipped to the study area with shapely; each customer is assigned by a direct nearest-site test | Cells O(m log m) expected; assignment O(m) per customer |
 | 5 | Greedy set cover (optional extension) | Which few warehouses cover everyone? | Each warehouse covers the customers within a radius; repeatedly keep the warehouse covering the most still-uncovered customers | Exact optimum is NP-hard; greedy is within H(n) ≈ ln n of it |
 | + | River check (real-world extension, §7) | Where does straight-line planning break? | Bank test against the river line; trips across go via the best allowed bridge or ferry | O(c) per trip; O(n · m · c) for the whole check |
@@ -185,15 +185,16 @@ The customers are sorted by x and split at the median into two halves. Each
 half is solved recursively (three or fewer points are solved by brute
 force); let `δ` be the smaller of the two halves' best distances. Any closer
 pair must have one point on each side and both within `δ` of the dividing
-vertical line, so only that strip of width 2δ is re-examined. The strip is
-sorted by y, and each point is compared only with the points above it until
-the y-gap reaches `δ`; a packing argument bounds this to a constant number of
-comparisons per point.
+vertical line, so only that strip of width 2δ is re-examined. Points in the
+strip are taken in y order, and each is compared only with the points above it
+until the y-gap reaches `δ`; a packing argument bounds this to a constant
+number of comparisons per point.
 
-The implementation re-sorts the strip by y at every level of the recursion,
-which gives O(n log² n). Keeping a y-sorted copy of the points through the
-recursion (the textbook version) would bring this down to O(n log n). Either
-way it avoids the O(n²) cost of comparing every pair.
+No level sorts anything. The points are sorted by x once at the start, and
+every recursive call returns its points sorted by y, built by merging the two
+halves' y-orders in linear time, as in merge sort. The strip is filtered from
+that merged list, so T(n) = 2T(n/2) + O(n) = O(n log n), against O(n²) for
+comparing every pair.
 
 The dashboard runs it on all customers (the two stops in the whole region
 that are nearest each other) and again **inside each Voronoi zone**, giving
@@ -203,9 +204,10 @@ each warehouse its own pair of stops worth grouping into one delivery.
 
 A KD-tree is built by recursively splitting the customer set at the median x
 (even depth) or median y (odd depth), so the tree is balanced with depth
-about log₂ n. The implementation sorts at every level to find the median,
-which makes the build O(n log² n); presorting or a linear-time median
-selection would give O(n log n).
+about log₂ n. The points are sorted once by x and once by y. Each node takes
+the median of the order for its axis and splits both orders in one linear pass
+(comparing ranks with the median's), so both stay sorted without re-sorting:
+T(n) = 2T(n/2) + O(n) = O(n log n).
 
 A rectangle range query recurses from the root. At each node it reports the
 node's point if it lies inside the box, then visits a child only if the box
@@ -475,23 +477,28 @@ distance by more than half.
 
 ## 8. Testing
 
-There are **28 automated tests** in three files, and all pass
+There are **36 automated tests** in three files, and all pass
 (`python -m pytest tests/ -v`).
 
-`tests/test_algorithms.py` (11 tests) checks each algorithm against a
+`tests/test_algorithms.py` (19 tests) checks each algorithm against a
 brute-force reference or a known answer:
 
-- Closest pair matches an O(n²) pairwise scan over five random seeds, and a
-  small hand-made case.
+- Closest pair matches an O(n²) pairwise scan over five random seeds and many
+  sizes, handles duplicate coordinates, and passes a small hand-made case. The
+  y-merge is sorted and stable, and a test fails if the recursion ever sorts
+  again after the single initial sort by x (the O(n log n) guarantee).
 - Convex hull keeps only the corners of a square with an interior point, and
   handles a fully collinear point set (degenerate case).
-- KD-tree range queries match a brute-force filter, and an empty box returns
-  nothing.
+- KD-tree range queries match a brute-force filter (also with many duplicate
+  coordinates), and an empty box returns nothing. The tree keeps the split
+  invariant and stays balanced when values tie, and a test fails if the build
+  sorts anything beyond the two initial presorts.
 - Greedy set cover covers every coverable customer, reproduces the overview
   document's worked example (W2 then W4), and stops when no candidate adds
   anything new.
 - The Walkthrough traces agree with the core algorithms (hull, closest pair,
-  KD-tree search), and the Voronoi trace ends at the nearest warehouse.
+  KD-tree search), also on duplicate points, and the Voronoi trace ends at the
+  nearest warehouse.
 
 `tests/test_geo.py` (10 tests) checks the geography and data handling:
 
@@ -549,9 +556,6 @@ ferry:
 - The Voronoi cells come from scipy/Qhull, not from Fortune's sweep-line
   algorithm named in the project overview. Both are O(m log m), but the
   sweep itself is not implemented or shown in the Walkthrough.
-- Closest pair and the KD-tree build re-sort at every level of recursion, so
-  as written they are O(n log² n) rather than the textbook O(n log n). At
-  these sizes (up to a few hundred points) this makes no visible difference.
 - The flat projection is only valid at regional scale; an uploaded CSV that
   spans a whole country would distort distances.
 
