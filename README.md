@@ -2,6 +2,8 @@
 
 **Algorithms II · Group project.** Akash Chakraborty (CSE/23011) · Anipriyo Mandal (CSE/23017) · Arpan Mandal (CSE/23027)
 
+![Network map: Voronoi service zones, convex hull, KD-tree search area, closest stops and the Hooghly with its bridge and ferries, on the OpenStreetMap basemap of the Kalyani region](report/screenshots/network_map.png)
+
 A geometric decision-support dashboard for deliveries around **Kalyani, West
 Bengal**. The study area covers about 400 km² and reaches Naihati, Chakdaha,
 Haringhata and, across the Hooghly, Mogra and Bansberia.
@@ -21,6 +23,21 @@ reached over **Ishwar Gupta Setu** or, on two wheels, by **ferry**.
 
 This is not a vehicle-routing system: it does not model traffic, fuel or
 driver scheduling.
+
+<table>
+  <tr>
+    <td width="33%"><img src="report/screenshots/river_crossing.png" alt="River crossing page"></td>
+    <td width="33%"><img src="report/screenshots/coverage_planner.png" alt="Coverage planner page"></td>
+    <td width="33%"><img src="report/screenshots/walkthrough_kdtree_search.png" alt="Walkthrough page, KD-tree search"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>River crossing</b>: real trips over the bridge or ferry vs. straight lines</td>
+    <td align="center"><b>Coverage planner</b>: greedy set cover, round by round</td>
+    <td align="center"><b>Walkthrough</b>: every step of each algorithm (here the KD-tree search)</td>
+  </tr>
+</table>
+
+The full write-up is in [`report/Smart_Delivery_Network_Report.pdf`](report/Smart_Delivery_Network_Report.pdf).
 
 ## Run
 
