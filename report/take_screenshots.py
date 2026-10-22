@@ -142,6 +142,16 @@ def main() -> None:
             png = base64.b64decode(tab.call("Page.captureScreenshot", format="png")["data"])
             (OUT / name).write_bytes(png)
             print(f"saved {OUT / name} ({len(png) // 1024} KB)")
+            if name == "network_map.png":
+                # A sharp close-up of just the map (2x pixels) for the report cover and the README.
+                rect = tab.js("(() => { const r = document.querySelector('[data-testid=\"stDeckGlJsonChart\"]')"
+                              ".getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
+                x, y, w, h = rect
+                clip = {"x": x, "y": y, "width": w, "height": h, "scale": 2}
+                png = base64.b64decode(tab.call("Page.captureScreenshot", format="png", clip=clip,
+                                                captureBeyondViewport=True)["data"])
+                (OUT / "map_closeup.png").write_bytes(png)
+                print(f"saved {OUT / 'map_closeup.png'} ({len(png) // 1024} KB)")
         tab.ws.close()
     finally:
         proc.terminate()  # only the browser this script started

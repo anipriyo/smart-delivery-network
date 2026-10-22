@@ -68,25 +68,25 @@ body { font-family: Inter, -apple-system, "Helvetica Neue", Arial, sans-serif; f
 
 /* ---------- cover ---------- */
 .cover { height: 297mm; width: 210mm; position: relative; overflow: hidden; break-after: page; background: #FFFFFF; }
-.cover .band { background: #1E1B4B; color: #fff; padding: 22mm 20mm 16mm; position: relative; }
+.cover .band { background: #1E1B4B; color: #fff; padding: 17mm 20mm 11mm; position: relative; }
 .cover .band::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2.2mm;
                       background: linear-gradient(90deg, #E11D48 0 16.6%, #D97706 16.6% 33.3%, #059669 33.3% 50%,
                                                   #7C3AED 50% 66.6%, #0891B2 66.6% 83.3%, #2563EB 83.3%); }
 .cover .eyebrow { font-size: 9pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #C7D2FE; }
-.cover h1 { font-size: 38pt; line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; margin: 7mm 0 0; color: #fff; border: 0; padding: 0; }
+.cover h1 { font-size: 34pt; line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; margin: 6mm 0 0; color: #fff; border: 0; padding: 0; }
 .cover h1 span { color: #A5B4FC; }
-.cover .sub { font-size: 12pt; line-height: 1.5; color: #E0E7FF; max-width: 150mm; margin-top: 6mm; }
-.cover .algos { display: flex; flex-wrap: wrap; gap: 2.5mm; margin-top: 8mm; }
+.cover .sub { font-size: 11.5pt; line-height: 1.5; color: #E0E7FF; max-width: 160mm; margin-top: 5mm; }
+.cover .algos { display: flex; flex-wrap: wrap; gap: 2.5mm; margin-top: 6mm; }
 .cover .algos span { font-size: 8.5pt; font-weight: 700; color: #fff; padding: 1.4mm 3.4mm; border-radius: 2mm;
                      background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); }
 .cover .algos i { display: inline-block; width: 2.2mm; height: 2.2mm; border-radius: .5mm; margin-right: 1.8mm; vertical-align: 0.1mm; }
-.cover .hero { margin: 10mm 20mm 0; height: 92mm; border-radius: 3mm; overflow: hidden; border: 1px solid #E2E8F0;
+.cover .hero { margin: 9mm 20mm 0; height: 140mm; border-radius: 3mm; overflow: hidden; border: 1px solid #E2E8F0;
                box-shadow: 0 2mm 6mm rgba(15,23,42,.10); }
-.cover .hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 62%; display: block; }
-.cover .meta { margin: 10mm 20mm 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4mm; }
-.cover .person { border: 1px solid #E2E8F0; border-radius: 2.5mm; padding: 3.5mm 4mm; border-top: 1mm solid #4F46E5; }
-.cover .person b { display: block; font-size: 11pt; font-weight: 700; }
-.cover .person span { display: block; font-size: 8.5pt; color: #64748B; margin-top: .8mm; }
+.cover .hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; display: block; }
+.cover .team { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4mm; margin-top: 8mm; padding-top: 5mm;
+               border-top: 1px solid rgba(255,255,255,.18); }
+.cover .team b { display: block; font-size: 11pt; font-weight: 700; color: #fff; }
+.cover .team span { display: block; font-size: 8.5pt; color: #C7D2FE; margin-top: .6mm; }
 .cover .foot { position: absolute; left: 20mm; right: 20mm; bottom: 16mm; display: flex; justify-content: space-between;
                align-items: flex-end; font-size: 8.8pt; color: #475569; border-top: 1px solid #E2E8F0; padding-top: 4mm; }
 .cover .foot b { color: #0F172A; display: block; font-size: 8pt; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1mm; }
@@ -143,8 +143,8 @@ def normalise_lists(md: str) -> str:
     """Adapt CommonMark-style lists to Python-Markdown's stricter rules.
 
     Python-Markdown needs nested content indented by multiples of 4 spaces and
-    a blank line between an intro sentence and the list that follows it; the
-    report uses 2-3 space indents and "...:" intros directly followed by items.
+    a blank line between a paragraph and the list that follows it, while the
+    report uses 2-3 space indents and lists directly under their intro line.
     """
     out: list[str] = []
     fenced = False
@@ -158,9 +158,9 @@ def normalise_lists(md: str) -> str:
                 line = " " * ((n + 3) // 4 * 4) + line.lstrip(" ")
             prev = out[-1] if out else ""
             if LIST_ITEM.match(line) and prev.strip():
-                intro = prev.rstrip().endswith(":") and not LIST_ITEM.match(prev)
+                after_text = not LIST_ITEM.match(prev)  # a list straight after a paragraph line
                 next_top_item = not line.startswith(" ") and (item_has_blocks or prev.startswith(" "))
-                if intro or next_top_item:
+                if after_text or next_top_item:
                     out.append("")
             if not line.strip():
                 item_has_blocks = True
@@ -173,17 +173,22 @@ def normalise_lists(md: str) -> str:
 
 
 def figures(md: str) -> str:
-    """Turn '### Screenshot: Title' + image into a numbered figure."""
+    """Turn each image line into a numbered figure.
+
+    The alt text's first sentence is the figure title, the rest the caption:
+    ``![Network map. What it shows...](screenshots/network_map.png)``.
+    """
     n = 0
 
     def repl(m: re.Match) -> str:
         nonlocal n
         n += 1
-        title, alt, src = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+        alt, src = m.group(1).strip(), m.group(2).strip()
+        title, _, rest = alt.partition(". ")
         return (f'<figure><img src="{html.escape(src)}" alt="">'
-                f'<figcaption><b>Figure {n}. {html.escape(title)}.</b> {html.escape(alt)}</figcaption></figure>\n')
+                f'<figcaption><b>Figure {n}. {html.escape(title)}.</b> {html.escape(rest)}</figcaption></figure>\n')
 
-    return re.sub(r"### Screenshot: ([^\n]+)\n\s*!\[([^\]]*)\]\(([^)]+)\)\n", repl, md)
+    return re.sub(r"(?m)^!\[([^\]]*)\]\(([^)]+)\)\s*$", repl, md)
 
 
 def contents(md: str) -> list[tuple[str, str]]:
@@ -196,7 +201,7 @@ def contents(md: str) -> list[tuple[str, str]]:
             if m:
                 items.append((m.group(1), m.group(2)))
             elif a:
-                items.append((a.group(1), f"Appendix: {a.group(2)}"))
+                items.append((a.group(1), f"{a.group(2)} (appendix)"))
             else:
                 items.append(("", text))
     return items
@@ -204,7 +209,7 @@ def contents(md: str) -> list[tuple[str, str]]:
 
 def cover(today: str) -> str:
     algos = "".join(f'<span><i style="background:{c}"></i>{html.escape(a)}</span>' for a, c in ALGOS)
-    people = "".join(f'<div class="person"><b>{html.escape(n)}</b><span>Reg. {r} · Roll {roll}</span></div>'
+    people = "".join(f'<div><b>{html.escape(n)}</b><span>Reg. {r} · Roll {roll}</span></div>'
                      for n, r, roll in TEAM)
     return f"""<section class="cover">
   <div class="band">
@@ -212,9 +217,9 @@ def cover(today: str) -> str:
     <h1>{html.escape(TITLE)}<br><span>{html.escape(TITLE_2)}</span></h1>
     <div class="sub">{html.escape(SUBTITLE)}</div>
     <div class="algos">{algos}</div>
+    <div class="team">{people}</div>
   </div>
-  <div class="hero"><img src="screenshots/network_map.png" alt=""></div>
-  <div class="meta">{people}</div>
+  <div class="hero"><img src="screenshots/map_closeup.png" alt=""></div>
   <div class="foot">
     <div><b>Source code</b><a href="{REPO}">{REPO.replace("https://", "")}</a></div>
     <div style="text-align:right"><b>Date</b>{html.escape(today)}</div>
@@ -226,11 +231,11 @@ def toc(items: list[tuple[str, str]]) -> str:
     rows = "".join(f'<li><span class="n">{html.escape(n)}</span><span>{html.escape(t)}</span></li>' for n, t in items)
     return f"""<section class="toc"><h2>Contents</h2><ol>{rows}</ol>
 <div class="abstract"><b>Summary.</b> A delivery network around Kalyani, West Bengal, built from 571 real
-OpenStreetMap places in a 401 km² area on both banks of the Hooghly. Five Algorithms II techniques plan it:
+OpenStreetMap places in a 401 km² area on both banks of the Hooghly. Five Algorithms II techniques plan it, namely
 Voronoi zones (who serves whom), a KD-tree (what is where), divide-and-conquer closest pair (what is near),
 the convex hull (how far it reaches) and greedy set cover (which sites to keep), shown in an interactive
 Streamlit dashboard with step-by-step walkthroughs. A river check then measures where straight-line
-planning breaks: with one road bridge along 27.5 km of river, a van's real trip to a cross-river hub is
+planning breaks. With one road bridge along 27.5 km of river, a van's real trip to a cross-river hub is
 more than twice the straight line.</div></section>"""
 
 
@@ -240,7 +245,7 @@ def build_html(today: str) -> str:
     items = contents(body_md)
     body = markdown.markdown(body_md, extensions=["tables", "fenced_code", "sane_lists", "attr_list"])
     # Start the main sections that open a new topic on a fresh page.
-    for heading in ("1. Problem Statement", "3. Algorithms Used", "6. Worked Example", "7. Real-World Issue",
+    for heading in ("1. Problem Statement", "3. Algorithms Used", "6. Worked Example", "7. Crossing the Hooghly",
                     "Appendix A."):
         body = re.sub(rf"<h2>({re.escape(heading)}[^<]*)</h2>", r'<h2 class="new-page">\1</h2>', body, count=1)
     base = HERE.as_uri() + "/"
