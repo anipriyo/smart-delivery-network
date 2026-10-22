@@ -3,13 +3,16 @@
 Kept separate from the tested core implementations (convex_hull.py,
 closest_pair.py, kdtree.py) so the teaching output can never affect
 correctness -- these mirror the same logic but log every decision instead
-of only returning the final answer. Coordinates are km, so distances are
+of only returning the final answer. They reuse the core modules' small linear
+helpers (the y-merge, the KD-tree presort and median split) so the steps shown
+are exactly the ones the core runs. Coordinates are km, so distances are
 shown in metres.
 """
 
 import math
 
-from .kdtree import KDTree
+from .closest_pair import merge_by_y
+from .kdtree import KDTree, presort, split_at_median
 from .models import Point
 
 
@@ -71,9 +74,10 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
                       f"{best[0].label}–{best[1].label} = {fmt_dist(best[2])}",
             "active_ids": [p.id for p in pts], "best": (best[0].id, best[1].id, best[2]),
         })
-        return best
+        return best, sorted(pts, key=lambda p: p.y)
 
     def solve(pts: list[Point], depth: int = 0):
+        """Return (best pair, pts sorted by y), like the core ``solve``."""
         n = len(pts)
         if n <= 3:
             return brute(pts, depth)
@@ -89,19 +93,20 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
             "left_ids": [p.id for p in left], "right_ids": [p.id for p in right],
         })
 
-        best_left = solve(left, depth + 1)
-        best_right = solve(right, depth + 1)
+        best_left, left_by_y = solve(left, depth + 1)
+        best_right, right_by_y = solve(right, depth + 1)
         best = best_left if best_left[2] <= best_right[2] else best_right
+        by_y = merge_by_y(left_by_y, right_by_y)
         steps.append({
             "depth": depth, "event": "combine",
             "detail": f"left best = {fmt_dist(best_left[2])}, right best = {fmt_dist(best_right[2])}, "
-                      f"so δ = {fmt_dist(best[2])}",
+                      f"so δ = {fmt_dist(best[2])}; merge both halves' south-to-north orders "
+                      f"into one ({n} points, no sorting)",
             "active_ids": [p.id for p in pts], "split_x": mid_x,
             "best": (best[0].id, best[1].id, best[2]),
         })
 
-        strip = [p for p in pts if abs(p.x - mid_x) < best[2]]
-        strip.sort(key=lambda p: p.y)
+        strip = [p for p in by_y if abs(p.x - mid_x) < best[2]]
         improved = False
         for i in range(len(strip)):
             for j in range(i + 1, len(strip)):
@@ -119,10 +124,10 @@ def closest_pair_trace(points: list[Point]) -> tuple[tuple[Point, Point, float],
             "active_ids": [p.id for p in pts], "split_x": mid_x, "delta": best[2],
             "strip_ids": [p.id for p in strip], "best": (best[0].id, best[1].id, best[2]),
         })
-        return best
+        return best, by_y
 
     by_x = sorted(points, key=lambda p: p.x)
-    result = solve(by_x)
+    result, _ = solve(by_x)
     return result, steps
 
 
@@ -131,15 +136,16 @@ def kdtree_build_trace(
 ) -> list[dict]:
     """``bounds`` is (x_min, x_max, y_min, y_max) of the area being split."""
     steps: list[dict] = []
+    pts = list(points)
+    by_x, by_y, rank = presort(pts)
 
-    def build(pts: list[Point], depth: int, box: tuple[float, float, float, float]) -> None:
-        if not pts:
+    def build(bx: list[int], by: list[int], depth: int, box: tuple[float, float, float, float]) -> None:
+        if not bx:
             return
         x_min, x_max, y_min, y_max = box
         axis = depth % 2
-        pts.sort(key=lambda p: p.x if axis == 0 else p.y)
-        mid = len(pts) // 2
-        median = pts[mid]
+        m, left, right = split_at_median(bx, by, axis, rank)
+        median = pts[m]
         if axis == 0:
             seg = ((median.x, y_min), (median.x, y_max))
             left_box, right_box = (x_min, median.x, y_min, y_max), (median.x, x_max, y_min, y_max)
@@ -148,14 +154,14 @@ def kdtree_build_trace(
             left_box, right_box = (x_min, x_max, y_min, median.y), (x_min, x_max, median.y, y_max)
         steps.append({
             "depth": depth, "axis": "x" if axis == 0 else "y",
-            "median_point": median.id, "n_points": len(pts), "seg": seg,
-            "detail": f"depth {depth}: split {len(pts)} point(s) on {'x (west/east)' if axis == 0 else 'y (south/north)'} "
-                      f"at the median, {median.label}",
+            "median_point": median.id, "n_points": len(bx), "seg": seg,
+            "detail": f"depth {depth}: split {len(bx)} point(s) on {'x (west/east)' if axis == 0 else 'y (south/north)'} "
+                      f"at the median, {median.label}, read from the presorted order",
         })
-        build(pts[:mid], depth + 1, left_box)
-        build(pts[mid + 1:], depth + 1, right_box)
+        build(*left, depth + 1, left_box)
+        build(*right, depth + 1, right_box)
 
-    build(list(points), 0, bounds)
+    build(by_x, by_y, 0, bounds)
     return steps
 
 
