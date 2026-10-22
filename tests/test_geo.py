@@ -1,4 +1,4 @@
-"""Geography and data: projection, OSM city, sampling, Voronoi zones, CSV."""
+"""Geography and data: projection, OSM region, sampling, Voronoi zones, CSV."""
 
 import io
 import math
@@ -7,13 +7,13 @@ import pytest
 from shapely.geometry import Point as ShapelyPoint
 
 from src.data import network_from_csv, network_to_csv, sample_network
-from src.geo import LocalProjection, load_city
+from src.geo import LocalProjection, load_region
 from src.voronoi import assign_customers, service_regions
 
 
 @pytest.fixture(scope="module")
 def city():
-    return load_city()
+    return load_region()
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -35,9 +35,10 @@ def test_projection_round_trip_and_accuracy():
     assert math.isclose(flat, haversine_km(*a, *b), rel_tol=2e-3)  # under 0.2 % at city scale
 
 
-def test_city_extract_is_sane(city):
-    assert 30 < city.area_km2 < 50  # Kalyani City outline is ~40 km²
-    assert len(city.places) >= 150
+def test_region_extract_is_sane(city):
+    assert 300 < city.area_km2 < 500  # five towns' hull padded by 2.5 km, ~400 km²
+    assert len(city.places) >= 400
+    assert sum(p["bank"] == 0 for p in city.places) >= 50  # real places on the west bank too
     assert all(city.boundary_xy.contains(ShapelyPoint(p["x"], p["y"])) for p in city.places)
 
 
@@ -56,7 +57,7 @@ def test_sampling_is_reproducible_and_inside_the_city(city):
 def test_warehouses_are_spread_out(city):
     net = sample_network(city, 5, 40, seed=3)
     gaps = [math.hypot(a.x - b.x, a.y - b.y) for i, a in enumerate(net.warehouses) for b in net.warehouses[i + 1:]]
-    assert min(gaps) > 0.8  # km
+    assert min(gaps) > 2.0  # km
 
 
 @pytest.mark.parametrize("m", [1, 2, 5, 8])

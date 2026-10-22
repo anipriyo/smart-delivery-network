@@ -1,4 +1,4 @@
-"""Convex hull via Graham scan. O(n log n)."""
+"""Convex hull via Andrew's monotone chain (a Graham-scan variant). O(n log n)."""
 
 from .models import Point
 
@@ -9,7 +9,7 @@ def _cross(o: Point, a: Point, b: Point) -> float:
 
 def convex_hull(points: list[Point]) -> list[Point]:
     """Return hull vertices in counter-clockwise order, starting from the
-    lowest (then leftmost) point. Collinear boundary points are dropped.
+    leftmost (then lowest) point. Collinear boundary points are dropped.
     """
     pts = sorted(set(points), key=lambda p: (p.x, p.y))
     if len(pts) < 3:

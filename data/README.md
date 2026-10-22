@@ -1,28 +1,48 @@
 # data/
 
-OpenStreetMap extracts of Kalyani, one folder per month (`YYYY-MM`). Treat each
-folder as read-only; to refresh, run the fetch script and it writes a new month.
-The app loads the newest complete folder.
+OpenStreetMap extracts, one folder per month (`YYYY-MM`), plus hand-kept
+additions in `manual/`. Treat each month folder as read-only; to refresh, run
+the fetch script, which writes the current month. The app loads the newest
+complete folder.
 
-## 2026-10 (fetched 22 Oct 2026, OSM timestamp 2026-10-22T07:49Z)
+## 2026-10 (fetched 22 Oct 2026)
+
+The **Kalyani region**: the convex hull of five town centres (Kalyani, Naihati,
+Chakdaha, Mogra, Haringhata) padded by 2.5 km. That is 401 km² on both banks
+of the Hooghly.
 
 | File | What it is |
 |---|---|
+| `raw/overpass_region_places.json` | Overpass response: every named feature (plus warehouses / industrial land) inside the study area |
+| `raw/overpass_river.json` | Overpass response: the ways of the OSM relation "Hooghly" near the area |
+| `raw/overpass_crossings.json` | Overpass response: road bridges, ferry routes and ferry terminals near the area |
 | `raw/overpass_boundary.json` | Overpass response: the *Kalyani City* outline, OSM way 1094723487 |
-| `raw/overpass_places.json` | Overpass response: every named feature (plus warehouses / industrial land) inside that outline, 443 elements |
-| `kalyani_boundary.geojson` | The outline as a GeoJSON Polygon (40.3 km²) |
-| `kalyani_places.csv` | 243 usable places: osm_type, osm_id, name, category, kind, lat, lon, warehouse_candidate, street. The app keeps the 242 whose centre lies inside the outline. |
+| `region.geojson` | Study-area polygon + the five anchor towns (with the OSM node each coordinate came from) |
+| `region_places.csv` | 571 usable places (52 warehouse candidates): osm_type, osm_id, name, category, kind, lat, lon, warehouse_candidate, street |
+| `towns.csv` | 10 city/town nodes inside the area (Bansberia, Chakdaha, Gayespur, Halisahar, Haringhata, Hugli-Chuchura, Kalyani, Kanchrapara, Madanpur, Naihati) |
+| `river.geojson` | The Hooghly's main channel as one line (side channels around islands dropped) |
+| `crossings.csv` | 3 crossings: **Ishwar Gupta Setu** (road bridge), **Naihati Ferry Ghat** (two OSM ferry terminals paired across the river), **Halisahar ferry ghat** (one OSM terminal; far landing estimated by mirroring across the channel) |
+| `kalyani_boundary.geojson` | The Kalyani City outline, drawn on the map for context |
+| `kalyani_places.csv`, `raw/overpass_places.json` | Legacy: the first extract (Kalyani City only, 242 places). No longer used by the app; kept because raw data is never edited. |
+
+Left out on purpose: the rail-only Jubilee and Sampreeti bridges (Naihati–Bandel),
+because delivery vehicles cannot use them, and ferry terminals outside the area
+(Jagaddal, Telinipara).
+
+## manual/
+
+`manual/ferries.csv` holds ferry crossings the team knows about that OpenStreetMap
+does not map. Columns: `name,lat_a,lon_a,lat_b,lon_b,note`, giving one landing on
+each bank. The app adds them to the crossings at start-up, marked "added by hand".
+It is empty for now.
 
 ## How it is produced
 
 From the project root:
 
 ```
-python scripts/fetch_osm_kalyani.py                 # fetch + build, writes data/<this month>/
-python scripts/fetch_osm_kalyani.py --month 2026-10 --reuse-raw   # rebuild CSV/GeoJSON from raw/ only
+python scripts/fetch_osm.py                 # downloads any missing raw files, then rebuilds every output
+python scripts/fetch_osm.py --refresh       # downloads every raw file again
 ```
-
-The script skips roads, rivers, rail lines, parks, parking and plain residential
-land, and drops duplicates where one place is mapped as both a node and a building.
 
 Data © OpenStreetMap contributors, available under the Open Database License (ODbL).

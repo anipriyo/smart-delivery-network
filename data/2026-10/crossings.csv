@@ -1,0 +1,4 @@
+name,kind,lat_a,lon_a,lat_b,lon_b,source,osm
+Ishwar Gupta Setu,bridge,22.968251,88.413495,22.966705,88.403518,OSM road bridge,way/44370909
+Halisahar ferry ghat,ferry,22.922055,88.405719,22.925647,88.402441,OSM ferry terminal (far landing estimated),node/1731370445
+Naihati Ferry Ghat,ferry,22.890034,88.411462,22.887723,88.403883,OSM ferry terminals (paired),node/11276872677;node/1731370410

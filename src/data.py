@@ -1,5 +1,5 @@
-"""Point sets for the dashboard: random real places of Kalyani from
-OpenStreetMap, or a user CSV of latitude/longitude points.
+"""Point sets for the dashboard: random real places of the Kalyani region
+from OpenStreetMap, or a user CSV of latitude/longitude points.
 """
 
 from __future__ import annotations
@@ -7,13 +7,14 @@ from __future__ import annotations
 import io
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 from shapely.geometry import MultiPoint, Polygon
 
-from .geo import City, LocalProjection
+from .geo import LocalProjection, Region
 from .models import Point
+from .river import River
 
 
 @dataclass
@@ -25,7 +26,10 @@ class Network:
     customers: list[Point]
     projection: LocalProjection
     region: Polygon  # area in km that service zones are clipped to
-    boundary_lonlat: list[tuple[float, float]] | None  # city outline to draw, if any
+    boundary_lonlat: list[tuple[float, float]] | None  # study-area outline to draw, if any
+    river: River | None = None
+    towns: list[dict] = field(default_factory=list)
+    inner_outline_lonlat: list[tuple[float, float]] | None = None  # Kalyani City, for context
 
     @property
     def bounds_xy(self) -> tuple[float, float, float, float]:
@@ -41,12 +45,12 @@ def _to_point(row: dict, pid: int, kind: str) -> Point:
 
 
 def sample_network(
-    city: City,
+    city: Region,
     n_warehouses: int = 5,
     n_customers: int = 60,
     seed: int = 42,
 ) -> Network:
-    """Pick random real places of the city as warehouses and customers.
+    """Pick random real places of the region as warehouses and customers.
 
     Warehouses come first from places OSM tags as warehouses, industrial,
     commercial or postal sites, then from any place, and must sit at least a
@@ -72,7 +76,7 @@ def sample_network(
                 continue
             if all(math.hypot(p["x"] - h["x"], p["y"] - h["y"]) >= gap for h in hubs):
                 hubs.append(p)
-        gap *= 0.8  # relax the spacing if the city ran out of far-apart places
+        gap *= 0.8  # relax the spacing if the region ran out of far-apart places
 
     hub_ids = {h["osm_id"] for h in hubs}
     rest = [p for p in places if p["osm_id"] not in hub_ids]
@@ -97,6 +101,9 @@ def sample_network(
         projection=city.projection,
         region=city.boundary_xy,
         boundary_lonlat=city.boundary_lonlat,
+        river=city.river,
+        towns=city.towns,
+        inner_outline_lonlat=city.kalyani_lonlat,
     )
 
 

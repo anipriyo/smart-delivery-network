@@ -16,7 +16,7 @@ from shapely.geometry import Polygon
 from src.closest_pair import closest_pair
 from src.convex_hull import convex_hull
 from src.data import Network, network_from_csv, network_to_csv, sample_network
-from src.geo import City, load_city
+from src.geo import Region, load_region
 from src.kdtree import KDTree
 from src.models import Point
 from src.voronoi import assign_customers, service_regions
@@ -26,13 +26,13 @@ from .style import ALGO, LOGO_SVG, MAX_WAREHOUSES, esc, fmt_km
 
 
 @st.cache_resource(show_spinner=False)
-def city() -> City:
-    return load_city()
+def region() -> Region:
+    return load_region()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def kalyani_network(n_warehouses: int, n_customers: int, seed: int) -> Network:
-    return sample_network(city(), n_warehouses, n_customers, seed)
+    return sample_network(region(), n_warehouses, n_customers, seed)
 
 
 @dataclass
@@ -100,27 +100,28 @@ def sidebar() -> Ctx:
     with sb:
         style.block(
             f'<div class="sdn-brand"><div class="logo">{LOGO_SVG}</div>'
-            '<div><b>Smart Delivery Network</b><span>Algorithms II · Kalyani</span></div></div>'
+            f'<div><b>{esc(style.PROJECT)}</b><span>Kalyani region · Algorithms II</span></div></div>'
         )
 
         source = st.segmented_control(
-            "Data", ["Kalyani (OSM)", "Upload CSV"], default="Kalyani (OSM)", required=True,
+            "Data", ["Kalyani region", "Upload CSV"], default="Kalyani region", required=True,
             key="source", width="stretch",
         )
 
         net: Network | None = None
-        if source == "Kalyani (OSM)":
-            c = city()
+        if source == "Kalyani region":
+            c = region()
+            west = sum(1 for p in c.places if p["bank"] == 0)
             style.block(
-                f'<div class="sdn-city"><div class="r1"><span>{esc(c.name)}</span>'
-                f'<span>{c.area_km2:.1f} km²</span></div>'
-                f'<div class="r2">Nadia, West Bengal · {len(c.places):,} named places from OpenStreetMap '
-                f'(extract {esc(c.source)})</div></div>'
+                f'<div class="sdn-city"><div class="r1"><span>Kalyani region</span>'
+                f'<span>{c.area_km2:.0f} km²</span></div>'
+                f'<div class="r2">Kalyani, Naihati, Chakdaha, Haringhata and Mogra, both banks of the Hooghly · '
+                f'{len(c.places):,} OpenStreetMap places ({west} west of the river) · extract {esc(c.source)}</div></div>'
             )
             n_w = st.slider("Warehouses", 2, MAX_WAREHOUSES, 5, key="n_w",
-                            help="Random real places become dispatch hubs, kept at least ~1 km apart.")
+                            help="Random real places become dispatch hubs, spread several km apart.")
             max_c = min(300, (len(c.places) - MAX_WAREHOUSES) // 5 * 5)
-            n_c = st.slider("Customers", 10, max_c, min(60, max_c), step=5, key="n_c",
+            n_c = st.slider("Customers", 10, max_c, min(80, max_c), step=5, key="n_c",
                             help="Random real places (shops, schools, offices, homes...) become delivery stops.")
             if "seed" not in st.session_state:
                 st.session_state["seed"] = 42
@@ -132,7 +133,7 @@ def sidebar() -> Ctx:
         else:
             up = st.file_uploader("CSV with type, lat, lon, name", type="csv",
                                   help="type is warehouse or customer; up to 8 warehouses.")
-            st.caption("Tip: download the current Kalyani network from the **Data** page to get a ready-made file.")
+            st.caption("Tip: download the current network from the **Data** page to get a ready-made file.")
             if up is not None:
                 try:
                     net = network_from_csv(up)
@@ -144,13 +145,16 @@ def sidebar() -> Ctx:
 
         st.divider()
         style.block(
-            '<div class="sdn-foot">Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+            f'<div class="sdn-foot"><b>{esc(style.COURSE)}</b><br>'
+            + " · ".join(esc(n) for n, _ in style.TEAM) + '<br><br>'
+            'Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
             'contributors (ODbL) · basemap © <a href="https://carto.com/attributions">CARTO</a>.<br>'
-            'Distances are straight-line (Euclidean) on a flat km grid, not road distance.</div>'
+            'The five algorithms use straight-line distance; the River crossing page shows where the Hooghly '
+            'makes real trips longer.</div>'
         )
 
     if net is None:
-        st.info("Upload a CSV in the sidebar to see your own network, or switch back to **Kalyani (OSM)**.",
+        st.info("Upload a CSV in the sidebar to see your own network, or switch back to **Kalyani region**.",
                 icon=":material/upload_file:")
         st.stop()
     return compute(net, source)
@@ -160,17 +164,18 @@ def csv_bytes(ctx: Ctx) -> str:
     return network_to_csv(ctx.net)
 
 
-def place_tip(ctx: Ctx, p: Point) -> str:
-    """Tooltip HTML for a point."""
-    name = esc(p.name or p.label)
-    cat = esc(p.category or p.kind)
+def place_tip(ctx: Ctx, p: Point) -> tuple[str, str, str]:
+    """Tooltip lines (title, detail, extra) for a point. Plain text."""
+    bank = ""
+    if ctx.net.river is not None:
+        bank = " · " + ("west bank" if ctx.net.river.bank(p.x, p.y) == 0 else "east bank")
+    cat = p.category or p.kind
     if p.kind == "warehouse":
         n = len(ctx.by_zone.get(p.id, []))
-        return (f"<b>{name}</b><br><span style='opacity:.7'>{p.label} · warehouse · {cat}</span>"
-                f"<br>Serves <b>{n}</b> customer{'s' if n != 1 else ''}")
+        return (p.name or p.label, f"{p.label} · warehouse · {cat}{bank}", f"Serves {n} customer{'s' if n != 1 else ''}")
     hub = ctx.wh_by_id[ctx.assignment[p.id]]
-    return (f"<b>{name}</b><br><span style='opacity:.7'>{p.label} · {cat}</span>"
-            f"<br>Zone <b>{hub.label}</b> · {fmt_km(ctx.dist_to_hub[p.id])} from hub")
+    return (p.name or p.label, f"{p.label} · {cat}{bank}",
+            f"Zone {hub.label} · {fmt_km(ctx.dist_to_hub[p.id])} from hub (straight line)")
 
 
 __all__ = ["Ctx", "sidebar", "compute", "csv_bytes", "place_tip", "ALGO"]

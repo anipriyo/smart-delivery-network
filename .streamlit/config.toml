@@ -1,5 +1,4 @@
-# Look and feel of the dashboard. Both themes are defined, so the app follows
-# the viewer's system setting and can be switched under ⋮ → Settings.
+# Look and feel of the dashboard: one light theme (user's choice, 22 Oct 2026).
 
 [browser]
 gatherUsageStats = false
@@ -8,43 +7,26 @@ gatherUsageStats = false
 toolbarMode = "minimal"
 
 [theme]
+base = "light"
+primaryColor = "#3B5BDB"
+backgroundColor = "#F5F7FB"
+secondaryBackgroundColor = "#EEF2F8"
+textColor = "#0F172A"
+linkColor = "#3B5BDB"
+borderColor = "#E3E7EF"
+showWidgetBorder = true
+showSidebarBorder = true
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
 headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
 codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap, monospace"
 baseFontSize = 15
 baseRadius = "12px"
 buttonRadius = "10px"
-showWidgetBorder = true
-showSidebarBorder = true
 headingFontWeights = [800, 700, 650, 600, 600, 600]
-chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
-
-[theme.dark]
-primaryColor = "#7AA2FF"
-backgroundColor = "#0B1020"
-secondaryBackgroundColor = "#141B2D"
-textColor = "#E6EAF2"
-borderColor = "#232D45"
-linkColor = "#8FB2FF"
-dataframeHeaderBackgroundColor = "#141B2D"
-chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
-
-[theme.dark.sidebar]
-backgroundColor = "#0E1426"
-secondaryBackgroundColor = "#171F33"
-borderColor = "#232D45"
-
-[theme.light]
-primaryColor = "#2F5BEA"
-backgroundColor = "#F6F7FB"
-secondaryBackgroundColor = "#EDF0F7"
-textColor = "#0F172A"
-borderColor = "#DCE2EE"
-linkColor = "#2F5BEA"
-dataframeHeaderBackgroundColor = "#EDF0F7"
+dataframeHeaderBackgroundColor = "#F1F4F9"
 chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
 
-[theme.light.sidebar]
+[theme.sidebar]
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F1F4FA"
-borderColor = "#DCE2EE"
+secondaryBackgroundColor = "#F3F5F9"
+borderColor = "#E6E9F0"
