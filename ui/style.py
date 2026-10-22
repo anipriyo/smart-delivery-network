@@ -196,8 +196,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* ---------- sidebar ---------- */
 .sdn-brand { display: flex; align-items: center; gap: 11px; margin: 0 0 4px; }
-.sdn-brand .logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: none; background: #4F46E5; }
-.sdn-brand .logo svg { width: 21px; height: 21px; }
+.sdn-brand .logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: none; background: #4F46E5;
+                   color: #fff; font-size: 14px; font-weight: 800; letter-spacing: -0.02em; }
 .sdn-brand b { display: block; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
 .sdn-brand span { display: block; font-size: 12px; color: var(--ink-3); }
 .sdn-city { border-radius: 12px; padding: 10px 12px; border: 1px solid var(--line); background: var(--wash); margin: 6px 0 2px; }
@@ -221,10 +221,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 </style>
 """
 
-LOGO_SVG = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.3"/></svg>'
-)
+LOGO = "SD"  # st.html strips inline SVG, so the logo is the project's initials
 
 
 def inject() -> None:

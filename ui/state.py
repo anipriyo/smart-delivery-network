@@ -22,7 +22,7 @@ from src.models import Point
 from src.voronoi import assign_customers, service_regions
 
 from . import style
-from .style import ALGO, LOGO_SVG, MAX_WAREHOUSES, esc, fmt_km
+from .style import ALGO, LOGO, MAX_WAREHOUSES, esc, fmt_km
 
 
 @st.cache_resource(show_spinner=False)
@@ -99,7 +99,7 @@ def sidebar() -> Ctx:
     sb = st.sidebar
     with sb:
         style.block(
-            f'<div class="sdn-brand"><div class="logo">{LOGO_SVG}</div>'
+            f'<div class="sdn-brand"><div class="logo">{LOGO}</div>'
             f'<div><b>{esc(style.PROJECT)}</b><span>Kalyani region · Algorithms II</span></div></div>'
         )
 

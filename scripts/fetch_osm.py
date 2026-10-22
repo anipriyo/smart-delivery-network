@@ -7,7 +7,7 @@ retries on several mirrors and can take a few minutes):
     python scripts/fetch_osm.py --refresh        # download every raw file again
 
 Study area: the convex hull of five town centres (Kalyani, Naihati, Chakdaha,
-Mogra, Haringhata) padded by 2.5 km, about 390 km^2 on both banks of the
+Mogra, Haringhata) padded by 2.5 km, about 400 km^2 on both banks of the
 Hooghly. Outputs under data/<YYYY-MM>/:
 
     raw/overpass_*.json        untouched Overpass responses
