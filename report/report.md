@@ -4,6 +4,8 @@
 
 Akash Chakraborty (Reg. 1059, Roll CSE/23011) · Anipriyo Mandal (Reg. 1065, Roll CSE/23017) · Arpan Mandal (Reg. 1075, Roll CSE/23027)
 
+**Live app.** [smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app), hosted on Streamlit Community Cloud.
+
 **Source code.** [github.com/anipriyo/smart-delivery-network](https://github.com/anipriyo/smart-delivery-network). Appendix A explains how to run it.
 
 ---
@@ -278,7 +280,7 @@ nine customers and the answer W2 then W4, is one of the unit tests.
 ## 5. Dashboard
 
 The dashboard is a Streamlit app (`app.py` and `ui/`) with six pages in a top
-navigation bar. The maps use deck.gl through pydeck on CARTO's light
+navigation bar. It runs online at [smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app) on Streamlit Community Cloud. The maps use deck.gl through pydeck on CARTO's light
 "Positron" basemap, which is built from OpenStreetMap data. The app uses a
 single light theme. Every page has a header with the project name, the course
 and summary chips, and the Network map and How it works pages also list the
@@ -614,6 +616,10 @@ first step towards distance models that follow the real geography.
 The complete source code, data and tests are in the GitHub repository
 [github.com/anipriyo/smart-delivery-network](https://github.com/anipriyo/smart-delivery-network).
 The project uses Python 3.12.
+
+The dashboard is also deployed on Streamlit Community Cloud at
+[smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app), so it can be tried in a browser without installing anything. To run
+it locally, clone the repository and start it as follows.
 
 ```
 git clone https://github.com/anipriyo/smart-delivery-network.git

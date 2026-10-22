@@ -51,6 +51,7 @@ TEAM = [("Akash Chakraborty", "1059", "CSE/23011"),
         ("Anipriyo Mandal", "1065", "CSE/23017"),
         ("Arpan Mandal", "1075", "CSE/23027")]
 REPO = "https://github.com/anipriyo/smart-delivery-network"
+LIVE = "https://smart-delivery-network.streamlit.app"
 ALGOS = [("Voronoi", "#E11D48"), ("KD-tree", "#059669"), ("Closest pair", "#7C3AED"),
          ("Convex hull", "#D97706"), ("Set cover", "#0891B2"), ("River check", "#2563EB")]
 
@@ -222,6 +223,7 @@ def cover(today: str) -> str:
   <div class="hero"><img src="screenshots/map_closeup.png" alt=""></div>
   <div class="foot">
     <div><b>Source code</b><a href="{REPO}">{REPO.replace("https://", "")}</a></div>
+    <div><b>Live app</b><a href="{LIVE}">{LIVE.replace("https://", "")}</a></div>
     <div style="text-align:right"><b>Date</b>{html.escape(today)}</div>
   </div>
 </section>"""

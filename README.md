@@ -2,6 +2,8 @@
 
 **Algorithms II · Group project.** Akash Chakraborty (CSE/23011) · Anipriyo Mandal (CSE/23017) · Arpan Mandal (CSE/23027)
 
+**Live app.** [smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app) (Streamlit Community Cloud, no installation needed)
+
 ![The Kalyani region on the OpenStreetMap basemap with Voronoi service zones, the convex hull, the KD-tree search area, the closest stops, and the Hooghly with its bridge and ferries](report/screenshots/map_closeup.png)
 
 A geometric decision-support dashboard for deliveries around **Kalyani, West
@@ -46,6 +48,8 @@ driver scheduling.
 The full write-up is in [`report/Smart_Delivery_Network_Report.pdf`](report/Smart_Delivery_Network_Report.pdf).
 
 ## Run
+
+The app runs online at [smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app). To run it locally instead:
 
 ```
 pip install -r requirements.txt
