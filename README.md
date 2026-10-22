@@ -4,6 +4,8 @@
 
 **Live app.** [smart-delivery-network.streamlit.app](https://smart-delivery-network.streamlit.app) (Streamlit Community Cloud, no installation needed)
 
+**Report (PDF).** [report/Smart_Delivery_Network_Report.pdf](report/Smart_Delivery_Network_Report.pdf)
+
 ![The Kalyani region on the OpenStreetMap basemap with Voronoi service zones, the convex hull, the KD-tree search area, the closest stops, and the Hooghly with its bridge and ferries](report/screenshots/map_closeup.png)
 
 A geometric decision-support dashboard for deliveries around **Kalyani, West
