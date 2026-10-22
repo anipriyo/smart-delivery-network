@@ -4,6 +4,8 @@
 
 Akash Chakraborty (Reg. 1059, Roll CSE/23011) · Anipriyo Mandal (Reg. 1065, Roll CSE/23017) · Arpan Mandal (Reg. 1075, Roll CSE/23027)
 
+**Source code:** <https://github.com/anipriyo/smart-delivery-network> (how to run it: Appendix A)
+
 ---
 
 ## 1. Problem Statement
@@ -54,6 +56,8 @@ The Hooghly splits the area into two banks:
 - **East bank (321 km²):** everything else, including Kalyani, Naihati,
   Halisahar, Kanchrapara, Haringhata and Chakdaha. Chakdaha is on the east
   bank because the river curves around Kalyani's north.
+
+27.5 km of the river's main channel runs through the area.
 
 **The points are real places.** The October 2026 extract holds **571
 usable named places** inside the area: shops, banks, schools, clinics,
@@ -470,7 +474,7 @@ on the west bank):
   only 10 m and 40 m shorter. So the river matters most for customers near
   the water, far from the only road bridge.
 
-In short, with only one road bridge along the 27 km of river inside the
+In short, with only one road bridge along the 27.5 km of river inside the
 area, the straight-line service zones are wrong for about 1 in 11 customers
 when deliveries go by van. For two-wheelers, the ferries cut the extra
 distance by more than half.
@@ -574,8 +578,7 @@ ferry:
 - Combine the Voronoi/KD-tree layer with an actual routing stage (e.g.
   nearest-neighbour or 2-opt TSP heuristics) per warehouse zone.
 - Implement Fortune's sweep for the Voronoi diagram and add it to the
-  Walkthrough, and switch closest pair and the KD-tree build to presorted
-  lists for the textbook O(n log n) bounds.
+  Walkthrough.
 
 ## 10. Data Sources and Attribution
 
@@ -601,6 +604,43 @@ geometrically grounded view of the delivery network, each piece solved by
 the Algorithms II technique it fits.
 
 The river check shows where that straight-line view stops being enough. With
-one road bridge along 27 km of the Hooghly, a van's real trip to a
+one road bridge along 27.5 km of the Hooghly, a van's real trip to a
 cross-river hub is more than twice the straight line. Knowing this is the first step
 towards distance models that follow the real geography.
+
+## Appendix A. Running the Project
+
+The complete source code, data and tests are in the GitHub repository
+<https://github.com/anipriyo/smart-delivery-network>. Python 3.12 was used.
+
+```
+git clone https://github.com/anipriyo/smart-delivery-network.git
+cd smart-delivery-network
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+The dashboard opens at <http://localhost:8501>. The OpenStreetMap extract is
+part of the repository (`data/2026-10/`), so the algorithms need no
+download; only the background street-map tiles need internet.
+
+| Task | Command |
+|---|---|
+| Run the 36 tests | `python -m pytest tests/ -v` |
+| Re-download the OSM extract (current month) | `python scripts/fetch_osm.py` |
+| Print every number used in this report | `python report/worked_example.py` |
+| Retake the four screenshots (app running) | `python report/take_screenshots.py` |
+| Rebuild this PDF from `report/report.md` | `python report/build_pdf.py` |
+
+### Repository layout
+
+| Path | Contents |
+|---|---|
+| `app.py`, `ui/` | Streamlit dashboard: pages, deck.gl map layers, styling |
+| `src/` | The algorithms (`convex_hull.py`, `closest_pair.py`, `kdtree.py`, `voronoi.py`, `set_cover.py`), the river model (`river.py`), geography and sampling (`geo.py`, `data.py`), Walkthrough traces (`traces.py`) |
+| `tests/` | `test_algorithms.py`, `test_geo.py`, `test_river.py` |
+| `scripts/fetch_osm.py` | OpenStreetMap download and cleaning |
+| `data/` | The October 2026 extract and hand-added ferries |
+| `report/` | This report, its screenshots and the scripts that produce them |
+| `Smart_Delivery_Network_Overview_Document.pdf` | The project overview the work started from |
+

@@ -8,7 +8,8 @@ The written project report and what it needs.
 | `worked_example.py` | Prints every number used in the report: region facts and the projection check (§2), the worked example (§6) and the river check by van and by two-wheeler (§7). Uses the app's defaults: seed 42, 5 warehouses, 80 customers, a 3.0 × 2.4 km search area around Kalyani City, and a 4 km radius. Keep these in step with `ui/state.py` and `ui/pages.py`. | `~/.venvs/analysis/bin/python report/worked_example.py` |
 | `screenshots/*.png` | Network map, River crossing (van mode), Coverage planner and Walkthrough (KD-tree search, final step), 1440 px wide, default settings | `take_screenshots.py` (below) |
 | `take_screenshots.py` | Opens the running app in a headless Brave/Chrome with a throwaway profile, takes the four screenshots, closes the browser | see below |
-| `Smart_Delivery_Network_Report.pdf` | **Out of date**: the PDF of the original synthetic-plane report. Its metadata says it was made with the ReportLab PDF library, but the script that made it was not kept. | Not reproducible yet (see below) |
+| `Smart_Delivery_Network_Report.pdf` | **The submission PDF** (20 pages, A4): cover with course, team and repository link, contents, the report with numbered figures, page numbers and PDF bookmarks | `build_pdf.py` (below) |
+| `build_pdf.py` | Markdown → styled HTML (cover, contents, figure captions, print CSS) → PDF, printed by a headless Brave/Chrome over the DevTools protocol with a throwaway profile | see below |
 
 ## Commands (from the project root)
 
@@ -35,10 +36,17 @@ automatically).
 
 ## PDF
 
-No Markdown-to-PDF tool is installed on the project Mac (no pandoc, LaTeX,
-weasyprint, wkhtmltopdf or typst, and no reportlab or markdown package in
-`~/.venvs/analysis`), so the PDF has not been regenerated for the new report.
-Whoever regenerates it should save the command or script here. The report
-uses Unicode symbols (δ, √, ≈, ², ₀, ↔), so the tool needs a Unicode-aware
-PDF engine (for pandoc, e.g. xelatex rather than pdflatex). Image links are
-relative to `report/`.
+Rebuild after any change to `report.md` or the screenshots:
+
+```bash
+~/.venvs/analysis/bin/python report/build_pdf.py
+```
+
+Needs the `markdown` package (`pip install markdown`; installed in
+`~/.venvs/analysis` on 22 Oct 2026) and Brave or Chrome in `/Applications`
+(`--browser` to choose another). The cover's team, course and repository URL
+are constants at the top of `build_pdf.py`; everything else comes from
+`report.md`, whose title block (before §1) is replaced by the cover. Brave's
+plain `--print-to-pdf` command-line mode hangs, which is why the script prints
+over the DevTools protocol instead. `--keep-html` also writes the intermediate
+HTML to `report/report_print.html` for inspection.

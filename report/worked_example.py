@@ -86,6 +86,7 @@ print(f"  projection anchored at lat0={region.projection.lat0:.4f}, lon0={region
 print(f"  {len(region.places)} places, {sum(p['warehouse_candidate'] for p in region.places)} warehouse candidates, "
       f"{west} west bank / {len(region.places) - west} east bank")
 print(f"  bank areas: west {rv.banks[0].area:.1f} km², east {rv.banks[1].area:.1f} km²")
+print(f"  Hooghly main channel inside the area: {rv.line.intersection(region.boundary_xy).length:.1f} km")
 print("  towns: " + ", ".join(f"{t['name']} ({'west' if rv.bank(t['x'], t['y']) == 0 else 'east'})"
                             for t in region.towns))
 for x in rv.crossings:
