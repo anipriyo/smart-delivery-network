@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import random
+from pathlib import Path
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,10 +28,20 @@ from . import style
 from .style import ALGO, LOGO, MAX_WAREHOUSES, esc, fmt_km
 
 
+_CODE = [Path(__file__), *sorted((Path(__file__).resolve().parent.parent / "src").glob("*.py"))]
+
+
 def _data_stamp() -> tuple:
-    """Changes whenever the extract on disk changes, so a redeploy with new data reloads the caches."""
+    """Changes whenever the extract or the code on disk changes, so a redeploy reloads the caches.
+
+    Cached objects (the region, road graph, networks and Ctx) are instances of
+    classes defined in src/ and here; after a code change, old instances would
+    lack new fields and methods.
+    """
     d = latest_data_dir()
-    return (str(d),) + tuple((f.name, f.stat().st_size) for f in sorted(d.iterdir()) if f.is_file())
+    data = tuple((f.name, f.stat().st_size) for f in sorted(d.iterdir()) if f.is_file())
+    code = tuple((f.name, f.stat().st_size, f.stat().st_mtime_ns) for f in _CODE)
+    return (str(d),) + data + code
 
 
 @st.cache_resource(show_spinner=False)
