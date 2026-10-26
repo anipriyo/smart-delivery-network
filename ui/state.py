@@ -27,23 +27,41 @@ from . import style
 from .style import ALGO, LOGO, MAX_WAREHOUSES, esc, fmt_km
 
 
+def _data_stamp() -> tuple:
+    """Changes whenever the extract on disk changes, so a redeploy with new data reloads the caches."""
+    d = latest_data_dir()
+    return (str(d),) + tuple((f.name, f.stat().st_size) for f in sorted(d.iterdir()) if f.is_file())
+
+
 @st.cache_resource(show_spinner=False)
-def region() -> Region:
+def _region(stamp: tuple) -> Region:
     return load_region()
 
 
+def region() -> Region:
+    return _region(_data_stamp())
+
+
 @st.cache_resource(show_spinner="Loading the Kalyani road network…")
-def road_graph() -> RoadGraph | None:
+def _road_graph(stamp: tuple) -> RoadGraph | None:
     path = latest_data_dir() / "roads.npz"
     if not path.exists():
         return None
-    r = region()
+    r = _region(stamp)
     return RoadGraph(path, r.projection, r.river.crossings)
 
 
+def road_graph() -> RoadGraph | None:
+    return _road_graph(_data_stamp())
+
+
 @st.cache_resource(show_spinner=False)
+def _kalyani_network(n_warehouses: int, n_customers: int, seed: int, stamp: tuple) -> Network:
+    return sample_network(_region(stamp), n_warehouses, n_customers, seed)
+
+
 def kalyani_network(n_warehouses: int, n_customers: int, seed: int) -> Network:
-    return sample_network(region(), n_warehouses, n_customers, seed)
+    return _kalyani_network(n_warehouses, n_customers, seed, _data_stamp())
 
 
 @dataclass
