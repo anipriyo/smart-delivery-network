@@ -224,6 +224,18 @@ def zones(net: Network, regions: dict, colour_of: dict[int, str], tips: dict[int
     )
 
 
+def zone_outlines(net: Network, regions: dict, colour_of: dict[int, str], layer_id: str = "zones-straight",
+                  width: float = 2.2) -> pdk.Layer | None:
+    """Dashed borders of zones in their warehouse colour (for comparing two zonings on one map)."""
+    data = [{"path": ring, "colour": rgb(colour_of[wid], 230)}
+            for wid, geom in regions.items() for ring in rings(net, geom)]
+    if not data:
+        return None
+    return pdk.Layer("PathLayer", id=layer_id, data=data, get_path="path", get_color="colour", width_units=PX,
+                     get_width=width, get_dash_array=[6, 4], dash_justified=True, extensions=DASH,
+                     joint_rounded=True, pickable=False)
+
+
 # ------------------------------------------------------------------ points
 
 def customers(net: Network, pts: list[Point], fill: dict[int, list[int]], tips: dict[int, tuple],

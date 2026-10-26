@@ -361,10 +361,14 @@ ServiceZones(W):
   merge the squares of each owner into its zone
 ```
 
-For an uploaded CSV there are no roads, so the classic straight-line cells
-are used. They come from `scipy.spatial.Voronoi`, which wraps Qhull and builds
-the dual of the Delaunay triangulation in O(m log m) expected time, and are
-clipped to the area with shapely.
+The **classic straight-line Voronoi diagram** is still computed alongside.
+It can be drawn over the road zones on the Network map as dashed outlines, the
+Walkthrough can trace a customer's assignment either way, and it is the zoning
+for an uploaded CSV, which has no roads. Its cells come from
+`scipy.spatial.Voronoi`, which wraps Qhull and builds the dual of the Delaunay
+triangulation in O(m log m) expected time, and are clipped to the area with
+shapely. Comparing the two on the map shows exactly where the river and the
+road layout move a border.
 
 ### 3.5 Greedy Set Cover
 
@@ -484,8 +488,9 @@ CARTO credits.
    - The customers in the search area
    - The customers whose straight-line hub lies across the Hooghly
 
-   The map shows the Voronoi zones by road, coloured by warehouse. It also
-   shows the convex hull, the KD-tree search area with its hits ringed, the
+   The map shows the Voronoi zones by road, coloured by warehouse, and a
+   *Classic Voronoi* layer can add the straight-line cells as dashed outlines
+   for comparison. It also shows the convex hull, the KD-tree search area with its hits ringed, the
    closest pair across the region as a thick line and the per-zone pairs as
    thin lines. The river with its bridge and ferries and the Kalyani City
    outline add context, and each layer can be switched off. Clicking any dot
@@ -537,7 +542,8 @@ CARTO credits.
    - **KD-tree build.** Each median split.
    - **KD-tree search.** Each visited node and skipped subtree.
    - **Voronoi assignment.** One customer compared with each warehouse in
-     turn, by road distance.
+     turn, by road distance or, with a switch, in a straight line as in the
+     classic diagram.
 
    Arrows and a slider move between steps. Beside each step the algorithm's
    pseudocode is shown with the line being run highlighted, and the algorithm

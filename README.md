@@ -88,7 +88,7 @@ pytest tests/ -v
 
 | Page | What it shows |
 |---|---|
-| Network map | Voronoi service zones by road distance, convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
+| Network map | Voronoi service zones by road distance (the classic straight-line Voronoi can be overlaid for comparison), convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
 | Route planner | Pick a product and one or more delivery places (from the list, at random, or by clicking the map). The fastest road route from a warehouse that stocks it, with stop order, itinerary, ETAs and a live-tracking slider. |
 | River crossing | Customers whose straight-line warehouse is on the other bank; the real road trip via the bridge (van) or bridge + ferry (two-wheeler); the extra distance; and the hub that is really nearest by road. |
 | Coverage planner | Greedy set cover: which warehouses to keep for a given road distance, round by round, with the area each kept warehouse reaches by road. |

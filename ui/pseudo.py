@@ -107,12 +107,14 @@ ALGOS: dict[str, dict] = {
             "To find a customer's zone, compare its road distance to every warehouse and keep the nearest.",
             "To draw the zones, cover the area with 150 m squares, give each square to the warehouse nearest by "
             "road, and merge the squares of each warehouse into one shape.",
+            "The classic Voronoi diagram uses the straight line instead. It can be shown on the Network map and "
+            "chosen here for comparison. Across the Hooghly the two disagree.",
         ],
         "code": [
             "Assign(customer c, warehouses W):",
             "  best ← none;  bestDist ← ∞",
             "  for each warehouse w in W:",
-            "    d ← road distance from w to c   ▷ Dijkstra from w",
+            "    d ← distance from w to c   ▷ by road (Dijkstra), or straight line",
             "    if d < bestDist: best ← w;  bestDist ← d",
             "  return best                 ▷ c lies in best's cell",
             "ServiceZones(W):",

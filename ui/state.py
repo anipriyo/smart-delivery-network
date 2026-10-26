@@ -99,6 +99,7 @@ class Ctx:
     cust_road_km: np.ndarray | None = None  # (warehouses x customers) door-to-door road km
     grid: AreaGrid | None = None  # 150 m cells over the area, for zones by road
     grid_road_km: np.ndarray | None = None  # (warehouses x cells) road km
+    regions_straight: dict[int, Polygon] = field(default_factory=dict)  # classic Voronoi cells (straight line)
 
     @property
     def by_road(self) -> bool:
@@ -127,6 +128,7 @@ def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
     assignment, dist = dict(straight), {}
     extra: dict = {}
     regions: dict[int, Polygon] = {}
+    straight_cells = service_regions(hubs, net.region)
     if g is not None and hubs and custs:
         wn, wg = g.snap([w.x for w in hubs], [w.y for w in hubs])
         cn, cg = g.snap([c.x for c in custs], [c.y for c in custs])
@@ -158,7 +160,8 @@ def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
         net=net, source=source,
         wh_index={w.id: i for i, w in enumerate(hubs)},
         assignment=assignment,
-        regions=regions if g is not None and hubs and custs else service_regions(hubs, net.region),
+        regions=regions if g is not None and hubs and custs else straight_cells,
+        regions_straight=straight_cells,
         hull=hull,
         hull_poly=Polygon([p.coords() for p in hull]) if len(hull) >= 3 else None,
         pair=closest_pair(custs) if len(custs) >= 2 else None,

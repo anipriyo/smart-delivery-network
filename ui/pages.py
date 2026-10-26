@@ -202,6 +202,7 @@ def network() -> None:
 
     options = {
         "zones": ":material/hexagon: Service zones (Voronoi" + (" by road)" if c.by_road else ")"),
+        **({"voronoi": ":material/pentagon: Classic Voronoi (straight line)"} if c.by_road else {}),
         "hull": ":material/pentagon: Network reach",
         "search": ":material/crop_free: Search area",
         "pairs": ":material/join_inner: Closest stops",
@@ -289,6 +290,8 @@ def network() -> None:
         lyr += L.city_outline(net)
         if "river" in on:
             lyr += L.river(net)
+        if "voronoi" in on:
+            lyr.append(L.zone_outlines(net, c.regions_straight, colour_of))
         if "hull" in on:
             lyr += L.hull(net, c.hull)
         if "search" in on:
@@ -314,6 +317,8 @@ def network() -> None:
                         key="netmap")
         legend = [("Warehouse zone (nearest by road)" if c.by_road else "Warehouse zone",
                    colour_of[net.warehouses[0].id], "box")] if net.warehouses else []
+        if "voronoi" in on and net.warehouses:
+            legend.append(("Classic Voronoi cell (straight line)", colour_of[net.warehouses[0].id], "dash"))
         legend += [("Network reach (convex hull)", ALGO["hull"], "line"),
                    ("Search area (KD-tree)", ALGO["kdtree"], "box"),
                    ("Closest stops", ALGO["pair"], "line")]
@@ -971,13 +976,16 @@ def walkthrough() -> None:
             cid = st.selectbox("Customer", list(labels), format_func=labels.get, key="wk_vor_c")
             p = cust_by_id[cid]
             pi = next(k for k, q in enumerate(custs) if q.id == p.id)
-            rows = voronoi_assignment_trace(p, net.warehouses, c.cust_road_km[:, pi] if c.by_road else None)
+            by_road = c.by_road and st.segmented_control(
+                "Distance", ["road", "straight"], format_func={"road": "By road", "straight": "Straight line (classic)"}.get,
+                default="road", required=True, key="wk_vor_mode") == "road"
+            rows = voronoi_assignment_trace(p, net.warehouses, c.cust_road_km[:, pi] if by_road else None)
             i = _step_nav("wk_vor", len(rows))
             r = rows[i - 1]
             w = c.wh_by_id[r["warehouse"]]
             best = c.wh_by_id[r["best_so_far"]]
             _step_card(i, len(rows), f"compare {w.label}", accent,
-                       f"{p.label} is {fmt_km(r['distance'])} from {w.label}{' by road' if c.by_road else ''}. "
+                       f"{p.label} is {fmt_km(r['distance'])} from {w.label}{' by road' if by_road else ' in a straight line'}. "
                        f"Nearest so far: {best.label} "
                        f"({fmt_km(r['best_distance'])}).")
             if i == len(rows):
@@ -985,9 +993,9 @@ def walkthrough() -> None:
                            icon=":material/check_circle:")
             pseudo.code_card("voronoi", accent, pseudo.lines_for("voronoi", r))
             colour_of = c.colour_of()
-            lyr.append(L.zones(net, c.regions, colour_of, {}, alpha=22))
+            lyr.append(L.zones(net, c.regions if by_road else c.regions_straight, colour_of, {}, alpha=22))
             lyr.append(_base_points(c, custs, dim))
-            if c.by_road and st.session_state.get("show_roads", False):  # road path from each warehouse so far
+            if by_road and st.session_state.get("show_roads", False):  # road path from each warehouse so far
                 _, pred = c.road.from_sources(c.wh_nodes, c.vehicle, "km", predecessors=True)
                 paths = []
                 for row in rows[:i]:
