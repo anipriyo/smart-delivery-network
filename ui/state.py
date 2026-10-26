@@ -10,15 +10,17 @@ import math
 import random
 from dataclasses import dataclass, field
 
+import numpy as np
 import streamlit as st
 from shapely.geometry import Polygon
 
 from src.closest_pair import closest_pair
 from src.convex_hull import convex_hull
 from src.data import Network, network_from_csv, network_to_csv, sample_network
-from src.geo import Region, load_region
+from src.geo import Region, latest_data_dir, load_region
 from src.kdtree import KDTree
 from src.models import Point
+from src.roads import VEHICLES, RoadGraph
 from src.voronoi import assign_customers, service_regions
 
 from . import style
@@ -28,6 +30,15 @@ from .style import ALGO, LOGO, MAX_WAREHOUSES, esc, fmt_km
 @st.cache_resource(show_spinner=False)
 def region() -> Region:
     return load_region()
+
+
+@st.cache_resource(show_spinner="Loading the Kalyani road network…")
+def road_graph() -> RoadGraph | None:
+    path = latest_data_dir() / "roads.npz"
+    if not path.exists():
+        return None
+    r = region()
+    return RoadGraph(path, r.projection, r.river.crossings)
 
 
 @st.cache_resource(show_spinner=False)
@@ -47,8 +58,21 @@ class Ctx:
     pair: tuple[Point, Point, float] | None
     zone_pairs: dict[int, tuple[Point, Point, float]]
     tree: KDTree | None
-    dist_to_hub: dict[int, float]  # customer id -> km
+    dist_to_hub: dict[int, float]  # customer id -> km (by road when roads are available)
     by_zone: dict[int, list[Point]] = field(default_factory=dict)
+    road: RoadGraph | None = None
+    vehicle: str = "bike"
+    assignment_straight: dict[int, int] = field(default_factory=dict)
+    wh_nodes: np.ndarray | None = None  # road node of each warehouse (same order as net.warehouses)
+    wh_gaps: np.ndarray | None = None  # km from the warehouse to that node
+    cust_nodes: np.ndarray | None = None
+    cust_gaps: np.ndarray | None = None
+    hub_km: np.ndarray | None = None  # (warehouses x road nodes) road km for the current vehicle
+    cust_road_km: np.ndarray | None = None  # (warehouses x customers) door-to-door road km
+
+    @property
+    def by_road(self) -> bool:
+        return self.road is not None
 
     @property
     def wh_by_id(self) -> dict[int, Point]:
@@ -65,12 +89,30 @@ class Ctx:
         return {w.id: self.zone_colour(w.id) for w in self.net.warehouses}
 
 
-def compute(net: Network, source: str) -> Ctx:
+def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
     hubs, custs = net.warehouses, net.customers
-    assignment = assign_customers(custs, hubs) if hubs else {}
+    straight = assign_customers(custs, hubs) if hubs else {}
     wh_by_id = {w.id: w for w in hubs}
-    dist = {c.id: math.hypot(c.x - wh_by_id[a].x, c.y - wh_by_id[a].y) for c, a in
-            ((c, assignment[c.id]) for c in custs)} if hubs else {}
+    g = road_graph() if net.river is not None else None
+    assignment, dist = dict(straight), {}
+    extra: dict = {}
+    if g is not None and hubs and custs:
+        wn, wg = g.snap([w.x for w in hubs], [w.y for w in hubs])
+        cn, cg = g.snap([c.x for c in custs], [c.y for c in custs])
+        hub_km = g.from_sources(wn, vehicle, "km")
+        road = hub_km[:, cn] + cg[None, :] + wg[:, None]
+        for i, c in enumerate(custs):
+            if np.isfinite(road[:, i]).any():
+                j = int(np.argmin(road[:, i]))
+                assignment[c.id], dist[c.id] = hubs[j].id, float(road[j, i])
+            else:  # unreachable by road: fall back to the straight line
+                w = wh_by_id[straight[c.id]]
+                dist[c.id] = math.hypot(c.x - w.x, c.y - w.y)
+        extra = dict(road=g, wh_nodes=wn, wh_gaps=wg, cust_nodes=cn, cust_gaps=cg, hub_km=hub_km,
+                     cust_road_km=road)
+    else:
+        dist = {c.id: math.hypot(c.x - wh_by_id[a].x, c.y - wh_by_id[a].y) for c, a in
+                ((c, assignment[c.id]) for c in custs)} if hubs else {}
     by_zone: dict[int, list[Point]] = {w.id: [] for w in hubs}
     for c in custs:
         by_zone[assignment[c.id]].append(c)
@@ -88,6 +130,9 @@ def compute(net: Network, source: str) -> Ctx:
         tree=KDTree(custs) if custs else None,
         dist_to_hub=dist,
         by_zone=by_zone,
+        vehicle=vehicle,
+        assignment_straight=straight,
+        **extra,
     )
 
 
@@ -120,9 +165,9 @@ def sidebar() -> Ctx:
             )
             n_w = st.slider("Warehouses", 2, MAX_WAREHOUSES, 5, key="n_w",
                             help="Random real places become dispatch hubs, spread several km apart.")
-            max_c = min(300, (len(c.places) - MAX_WAREHOUSES) // 5 * 5)
-            n_c = st.slider("Customers", 10, max_c, min(80, max_c), step=5, key="n_c",
-                            help="Random real places (shops, schools, offices, homes...) become delivery stops.")
+            max_c = min(1000, (len(c.places) - MAX_WAREHOUSES) // 10 * 10)
+            n_c = st.slider("Customers", 10, max_c, min(150, max_c), step=10, key="n_c",
+                            help="Random real places (homes, shops, schools, offices...) become delivery stops.")
             if "seed" not in st.session_state:
                 st.session_state["seed"] = 42
             seed = st.number_input("Random seed", min_value=0, max_value=99999, step=1, key="seed",
@@ -130,6 +175,10 @@ def sidebar() -> Ctx:
             st.button("Shuffle network", icon=":material/casino:", on_click=_reshuffle, width="stretch",
                       help="Pick a new random seed")
             net = kalyani_network(int(n_w), int(n_c), int(seed))
+            vehicle = st.segmented_control(
+                "Delivery by", list(VEHICLES), format_func=VEHICLES.get, default="bike", required=True,
+                key="vehicle", width="stretch",
+                help="Road distances and routes use this vehicle. Two-wheelers may also take the Hooghly ferries.")
         else:
             up = st.file_uploader("CSV with type, lat, lon, name", type="csv",
                                   help="type is warehouse or customer; up to 8 warehouses.")
@@ -149,15 +198,15 @@ def sidebar() -> Ctx:
             + " · ".join(esc(n) for n, _ in style.TEAM) + '<br><br>'
             'Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
             'contributors (ODbL) · basemap © <a href="https://carto.com/attributions">CARTO</a>.<br>'
-            'The five algorithms use straight-line distance; the River crossing page shows where the Hooghly '
-            'makes real trips longer.</div>'
+            'Distances to warehouses follow the OpenStreetMap roads (Dijkstra), with the Hooghly crossed only '
+            'by Ishwar Gupta Setu or, on a two-wheeler, a ferry.</div>'
         )
 
     if net is None:
         st.info("Upload a CSV in the sidebar to see your own network, or switch back to **Kalyani region**.",
                 icon=":material/upload_file:")
         st.stop()
-    return compute(net, source)
+    return compute(net, source, st.session_state.get("vehicle", "bike") if net.river is not None else "bike")
 
 
 def csv_bytes(ctx: Ctx) -> str:
@@ -175,7 +224,8 @@ def place_tip(ctx: Ctx, p: Point) -> tuple[str, str, str]:
         return (p.name or p.label, f"{p.label} · warehouse · {cat}{bank}", f"Serves {n} customer{'s' if n != 1 else ''}")
     hub = ctx.wh_by_id[ctx.assignment[p.id]]
     return (p.name or p.label, f"{p.label} · {cat}{bank}",
-            f"Zone {hub.label} · {fmt_km(ctx.dist_to_hub[p.id])} from hub (straight line)")
+            f"Zone {hub.label} · {fmt_km(ctx.dist_to_hub[p.id])} to the hub "
+            f"{'by road' if ctx.by_road else '(straight line)'}")
 
 
 __all__ = ["Ctx", "sidebar", "compute", "csv_bytes", "place_tip", "ALGO"]

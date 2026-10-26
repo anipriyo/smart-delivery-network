@@ -12,7 +12,8 @@ A geometric decision-support dashboard for deliveries around **Kalyani, West
 Bengal**. The study area covers about 400 km² and reaches Naihati, Chakdaha,
 Haringhata and, across the Hooghly, Mogra and Bansberia.
 
-Random real places from **OpenStreetMap** become warehouses and customers.
+Random real places from **OpenStreetMap** become warehouses and customers
+(up to 1,000 customers, mostly real homes from the OSM building footprints).
 Five Algorithms II techniques then plan the network:
 
 - Voronoi decides who serves whom.
@@ -21,12 +22,20 @@ Five Algorithms II techniques then plan the network:
 - The convex hull shows how far the network reaches.
 - Greedy set cover picks the sites worth keeping.
 
-A **river check** then shows where straight-line planning breaks in the real
-world. Customers whose nearest warehouse is across the Hooghly can only be
-reached over **Ishwar Gupta Setu** or, on two wheels, by **ferry**.
+Distances follow the **real road network** (121,678 OSM road nodes, Dijkstra),
+so each customer is served by the warehouse nearest **by road**, and coverage
+is measured along the roads. A **river check** shows where straight-line
+planning breaks: customers whose nearest warehouse is across the Hooghly can
+only be reached over **Ishwar Gupta Setu** or, on two wheels, by **ferry**.
 
-This is not a vehicle-routing system: it does not model traffic, fuel or
-driver scheduling.
+The **Route planner** answers "product X is needed at these places, which way
+should the rider go?". It picks a warehouse that stocks the product, finds the
+fastest road route through every stop (exact Held-Karp order up to 10 stops,
+nearest neighbour + 2-opt above), draws it on the map with an itinerary and
+ETAs, and simulates the rider's progress.
+
+It is a decision-support tool, not a navigation app: there is no live traffic,
+fuel or driver scheduling.
 
 <table>
   <tr>
@@ -77,9 +86,10 @@ pytest tests/ -v
 
 | Page | What it shows |
 |---|---|
-| Network map | Voronoi service zones, convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
-| River crossing | Customers whose straight-line warehouse is on the other bank; the real trip via bridge (van) or bridge + ferry (two-wheeler); the extra distance; and the hub that is really nearest. |
-| Coverage planner | Greedy set cover: which warehouses to keep for a given radius, round by round. |
+| Network map | Service zones by road (and the straight-line Voronoi for comparison), convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
+| Route planner | Pick a product and one or more delivery places (from the list, at random, or by clicking the map). The fastest road route from a warehouse that stocks it, with stop order, itinerary, ETAs and a live-tracking slider. |
+| River crossing | Customers whose straight-line warehouse is on the other bank; the real road trip via the bridge (van) or bridge + ferry (two-wheeler); the extra distance; and the hub that is really nearest by road. |
+| Coverage planner | Greedy set cover: which warehouses to keep for a given road distance, round by round. |
 | Walkthrough | Step through every decision of each algorithm on the current map. |
 | Data | The full point set with zones, banks and distances; CSV download. |
 | How it works | The algorithms, the OSM pipeline, scope and limits. |
@@ -92,19 +102,21 @@ pytest tests/ -v
 - `src/voronoi.py`: nearest-warehouse assignment and service zones clipped to the study area
 - `src/set_cover.py`: greedy set cover (optional extension), ln n approximation
 - `src/river.py`: river banks, trips via bridges/ferries, the river check
+- `src/roads.py`: the OSM road graph, Dijkstra, snapping places to roads, and the route planner (Held-Karp, nearest neighbour + 2-opt)
 - `src/traces.py`: instrumented copies of the algorithms for the Walkthrough page
 - `src/geo.py`: study area, places, river, crossings, and the lat/lon → flat km projection
 - `src/data.py`: random sampling of real places, CSV import/export
 - `ui/`: Streamlit pages, deck.gl map layers and styling; the theme is in `.streamlit/config.toml`
 - `scripts/fetch_osm.py`: downloads the OSM extract into `data/<YYYY-MM>/`
-- `tests/`: every algorithm checked against a brute-force reference, plus geography, data and river tests
-- `report/`: written report and the scripts that produce its numbers and screenshots
+- `tests/`: every algorithm checked against a brute-force reference, plus geography, data, river and routing tests
+- `report/`: written report, the scripts that produce its numbers and screenshots, and the project overview document it started from
 
 ## Data
 
-`data/2026-10/` holds the extract the app uses (fetched 22 Oct 2026): 571 named
-places, the Hooghly's main channel, and 3 crossings (Ishwar Gupta Setu,
-Naihati ferry, Halisahar ferry). See `data/README.md` for every file. To
+`data/2026-10/` holds the extract the app uses (fetched 22 Oct 2026, roads and
+buildings added 26 Oct 2026): 9,422 places (571 named places and 8,851
+buildings), the drivable road network, the Hooghly's main channel, and 3
+crossings (Ishwar Gupta Setu, Naihati ferry, Halisahar ferry). See `data/README.md` for every file. To
 refresh it (needs internet):
 
 ```
@@ -119,8 +131,8 @@ Map data © OpenStreetMap contributors (ODbL). Basemap © CARTO.
 ## CSV upload format
 
 Any city works: the flat km grid is centred on the uploaded points. Upload up to
-8 warehouses. Uploaded networks have no river, so the River crossing page is
-skipped.
+8 warehouses. Uploaded networks have no river or road network, so distances
+are straight lines and the River crossing and Route planner pages are skipped.
 
 ```
 type,name,lat,lon

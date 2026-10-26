@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pydeck as pdk
 from shapely.geometry import MultiPolygon, Polygon
 
@@ -339,3 +340,52 @@ def circles(net: Network, centres: list[tuple[Point, str]], radius_km: float, la
         get_line_color="line", stroked=True, line_width_min_pixels=2, get_radius=radius_km * 1000,
         pickable=False,
     )
+
+
+# ------------------------------------------------------------------ roads
+
+def road_lines(g, owner: np.ndarray, colour_of_owner: dict[int, str], layer_id: str = "road-zones",
+               width: float = 2.4, alpha: int = 215) -> pdk.Layer | None:
+    """Main roads coloured by ``owner[node]`` (-1 = not drawn), split wherever the owner changes."""
+    data = []
+    for run in g.major_runs():
+        nodes = np.r_[g.u[run[0]], g.v[run]]
+        own = owner[nodes]
+        start = 0
+        for i in range(1, len(nodes) + 1):
+            if i == len(nodes) or own[i] != own[start]:
+                o = int(own[start])
+                seg = nodes[start:i + 1] if i < len(nodes) else nodes[start:i]
+                if o >= 0 and len(seg) >= 2:
+                    data.append({"path": [[round(float(g.lon[n]), 5), round(float(g.lat[n]), 5)] for n in seg],
+                                 "colour": rgb(colour_of_owner[o], alpha)})
+                start = i
+    if not data:
+        return None
+    return pdk.Layer("PathLayer", id=layer_id, data=data, get_path="path", get_color="colour", width_units=PX,
+                     get_width=width, joint_rounded=True, cap_rounded=True, pickable=False)
+
+
+def lonlat_paths(paths: list[dict], layer_id: str, width: float = 4, dashed: bool = False) -> pdk.Layer | None:
+    """paths: dicts with 'path' ([[lon, lat], ...]), 'colour' (hex), optional 'alpha' and 'tip' tuple."""
+    if not paths:
+        return None
+    data = [{"path": p["path"], "colour": rgb(p["colour"], p.get("alpha", 235)), **_tip(p.get("tip"))} for p in paths]
+    extra = {"get_dash_array": [4, 3], "dash_justified": True, "extensions": DASH} if dashed else {}
+    return pdk.Layer("PathLayer", id=layer_id, data=data, get_path="path", get_color="colour", width_units=PX,
+                     get_width=width, joint_rounded=True, cap_rounded=True,
+                     pickable=any(p.get("tip") for p in paths), **extra)
+
+
+def numbered_stops(points: list[tuple[list[float], str, str]], layer_id: str = "stops") -> list[pdk.Layer]:
+    """points: ([lon, lat], label, hex colour) drawn as filled discs with the label inside."""
+    data = [{"pos": pos, "text": label, "fill": rgb(colour)} for pos, label, colour in points]
+    return [
+        pdk.Layer("ScatterplotLayer", id=f"{layer_id}-disc", data=data, get_position="pos", get_fill_color="fill",
+                  get_line_color=[255, 255, 255, 255], stroked=True, line_width_min_pixels=2, get_radius=60,
+                  radius_min_pixels=11, radius_max_pixels=15, pickable=False),
+        pdk.Layer("TextLayer", id=f"{layer_id}-text", data=data, get_position="pos", get_text="text", get_size=11,
+                  get_color=[255, 255, 255, 255], font_weight=800, font_family=FONT, pickable=False,
+                  get_text_anchor=pdk.types.String("middle"), get_alignment_baseline=pdk.types.String("center")),
+    ]
+

@@ -25,6 +25,7 @@ st.session_state["ctx"] = sidebar()
 nav = st.navigation(
     [
         st.Page(pages.network, title="Network map", icon=":material/map:", default=True),
+        st.Page(pages.routing, title="Route planner", icon=":material/route:", url_path="route"),
         st.Page(pages.river, title="River crossing", icon=":material/water:", url_path="river"),
         st.Page(pages.coverage, title="Coverage planner", icon=":material/radar:", url_path="coverage"),
         st.Page(pages.walkthrough, title="Walkthrough", icon=":material/footprint:", url_path="walkthrough"),

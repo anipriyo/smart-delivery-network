@@ -12,7 +12,8 @@ Hooghly. Outputs under data/<YYYY-MM>/:
 
     raw/overpass_*.json        untouched Overpass responses
     region.geojson             study-area polygon + the five anchor towns
-    region_places.csv          named places inside the area (warehouse/customer pool)
+    region_places.csv          named places and buildings inside the area (warehouse/customer pool)
+    roads.npz                  drivable road network as a graph (nodes, edges, lengths, classes, names)
     towns.csv                  city/town nodes inside the area (map labels)
     river.geojson              Hooghly main channel as one line
     crossings.csv              road bridges and ferries across the Hooghly
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import gzip
 import json
 import math
 import sys
@@ -86,6 +88,11 @@ WAREHOUSE_TAGS = {
     ("amenity", "marketplace"), ("shop", "supermarket"), ("landuse", "retail"),
 }
 ROAD_BRIDGE = "motorway|trunk|primary|secondary|tertiary"
+DRIVABLE = ("motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|"
+            "tertiary|tertiary_link|unclassified|residential|living_street|service|road")
+# Building types that are not delivery points.
+NOT_DELIVERABLE = {"roof", "shed", "garage", "garages", "construction", "ruins", "toilets", "transformer_tower",
+                   "bunker", "service", "carport", "cowshed", "hut", "container", "tank", "water_tower"}
 
 
 # ------------------------------------------------------------------ network
@@ -147,6 +154,14 @@ out center tags;""",
 relation["waterway"="river"]["name"="{HOOGHLY_RELATION_NAME}"]({bb})->.r;
 way(r.r)({bb});
 out geom tags;""",
+        "roads": f"""[out:json][timeout:300];
+way["highway"~"^({DRIVABLE})$"](poly:"{poly_filter(area.buffer(0.01))}");
+out body;
+>;
+out skel qt;""",
+        "buildings": f"""[out:json][timeout:240];
+way["building"](poly:"{poly}");
+out center tags;""",
         "crossings": f"""[out:json][timeout:120];
 (
   way["bridge"]["highway"~"^({ROAD_BRIDGE})$"]({bb});
@@ -302,6 +317,108 @@ def build_crossings(raw: dict, river_ll: LineString, area: Polygon, towns: list[
 
 # ------------------------------------------------------------------ main
 
+# ------------------------------------------------------------------ roads + buildings
+
+def build_roads(raw: dict, area: Polygon) -> dict:
+    """Road graph: every OSM node of a drivable way, edges between consecutive nodes."""
+    import numpy as np
+
+    proj = LocalProjection(lat0=area.bounds[1], lon0=area.bounds[0])
+    coords = {e["id"]: (e["lat"], e["lon"]) for e in raw["elements"] if e["type"] == "node"}
+    index: dict[int, int] = {}
+    lat, lon = [], []
+
+    def idx(node_id: int) -> int:
+        if node_id not in index:
+            index[node_id] = len(lat)
+            la, lo = coords[node_id]
+            lat.append(la)
+            lon.append(lo)
+        return index[node_id]
+
+    classes: list[str] = []
+    names: list[str] = [""]
+    u, v, length, cls, name, bridge = [], [], [], [], [], []
+    for w in raw["elements"]:
+        if w["type"] != "way":
+            continue
+        tags = w.get("tags", {})
+        h = tags.get("highway", "road")
+        if h not in classes:
+            classes.append(h)
+        nm = tags.get("name:en") or tags.get("name") or tags.get("ref") or ""
+        if nm not in names:
+            names.append(nm)
+        refs = [r for r in w.get("nodes", []) if r in coords]
+        for a, b in zip(refs, refs[1:]):
+            ia, ib = idx(a), idx(b)
+            xa, ya = proj.to_xy(*coords[a])
+            xb, yb = proj.to_xy(*coords[b])
+            u.append(ia); v.append(ib)
+            length.append(math.hypot(xb - xa, yb - ya) * 1000.0)
+            cls.append(classes.index(h))
+            name.append(names.index(nm))
+            bridge.append(1 if tags.get("bridge") not in (None, "no") else 0)
+    return {
+        "lat": np.array(lat), "lon": np.array(lon),
+        "u": np.array(u, dtype=np.int32), "v": np.array(v, dtype=np.int32),
+        "length_m": np.array(length, dtype=np.float32), "cls": np.array(cls, dtype=np.int8),
+        "name": np.array(name, dtype=np.int32), "bridge": np.array(bridge, dtype=np.int8),
+        "classes": np.array(classes), "names": np.array(names),
+    }
+
+
+def build_buildings(raw: dict, area: Polygon, roads: dict, towns: list[dict], known: list[dict]) -> list[dict]:
+    """Unnamed buildings as extra customers, named from their address or the nearest named road."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    proj = LocalProjection(lat0=area.bounds[1], lon0=area.bounds[0])
+    named_edges = np.nonzero(roads["name"] > 0)[0]
+    mid_x, mid_y = [], []
+    for e in named_edges:
+        a, b = roads["u"][e], roads["v"][e]
+        xa, ya = proj.to_xy(roads["lat"][a], roads["lon"][a])
+        xb, yb = proj.to_xy(roads["lat"][b], roads["lon"][b])
+        mid_x.append((xa + xb) / 2); mid_y.append((ya + yb) / 2)
+    road_tree = cKDTree(np.c_[mid_x, mid_y]) if mid_x else None
+    taken = {(round(p["lat"], 4), round(p["lon"], 4)) for p in known}
+    known_ids = {(p["osm_type"], p["osm_id"]) for p in known}
+    rows = []
+    for el in raw["elements"]:
+        tags = el.get("tags", {})
+        lat, lon = latlon(el)
+        if lat is None or ("way", el["id"]) in known_ids or tags.get("name"):
+            continue  # named buildings are already in the places query
+        btype = tags.get("building", "yes")
+        if btype in NOT_DELIVERABLE or not area.contains(Point(lon, lat)):
+            continue
+        if (round(lat, 4), round(lon, 4)) in taken:
+            continue
+        taken.add((round(lat, 4), round(lon, 4)))
+        x, y = proj.to_xy(lat, lon)
+        kind = "home" if btype in ("yes", "house", "residential", "apartments", "detached", "semidetached_house",
+                                   "terrace", "bungalow") else btype.replace("_", " ")
+        hn, street = tags.get("addr:housenumber"), tags.get("addr:street")
+        if street:
+            label = f"No. {hn}, {street}" if hn else f"Home on {street}"
+        else:
+            label = None
+            if road_tree is not None:
+                d, i = road_tree.query([x, y])
+                if d <= 0.3:
+                    label = f"{'Home' if kind == 'home' else kind.capitalize()} near " \
+                            f"{roads['names'][roads['name'][named_edges[i]]]}"
+            if label is None:
+                label = f"{'Home' if kind == 'home' else kind.capitalize()} in {nearest_town(lat, lon, towns)}"
+        rows.append({
+            "osm_type": "way", "osm_id": el["id"], "name": label, "category": "building", "kind": kind,
+            "lat": round(lat, 7), "lon": round(lon, 7), "warehouse_candidate": 0, "street": street or "",
+        })
+    rows.sort(key=lambda r: r["osm_id"])
+    return rows
+
+
 def write_csv(path: Path, rows: list[dict]) -> None:
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
@@ -320,18 +437,32 @@ def main() -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     area, _ = study_area()
     names = {"boundary": "overpass_boundary.json", "places": "overpass_region_places.json",
-             "river": "overpass_river.json", "crossings": "overpass_crossings.json"}
+             "river": "overpass_river.json", "crossings": "overpass_crossings.json",
+             "roads": "overpass_roads.json.gz", "buildings": "overpass_buildings.json.gz"}
     raw: dict[str, dict] = {}
     for key, query in queries(area).items():
         path = raw_dir / names[key]
+        opener = gzip.open if path.suffix == ".gz" else open
         if path.exists() and not args.refresh:
-            raw[key] = json.loads(path.read_text())
+            with opener(path, "rt", encoding="utf-8") as fh:
+                raw[key] = json.load(fh)
             continue
         print(f"Fetching {key}...", file=sys.stderr)
         raw[key] = overpass(query)
-        path.write_text(json.dumps(raw[key]))
+        with opener(path, "wt", encoding="utf-8") as fh:
+            json.dump(raw[key], fh)
+
+    import numpy as np
 
     places, towns = build_places(raw["places"], area)
+    roads = build_roads(raw["roads"], area)
+    np.savez_compressed(out / "roads.npz", **roads)
+    buildings = build_buildings(raw["buildings"], area, roads, towns, places)
+    for p in places:
+        p["source"] = "named place"
+    for b in buildings:
+        b["source"] = "building"
+    places = places + buildings
     river = build_river(raw["river"], area)
     crossings = build_crossings(raw["crossings"], river, area, towns)
 
@@ -358,8 +489,9 @@ def main() -> None:
     write_csv(out / "towns.csv", towns)
     write_csv(out / "crossings.csv", crossings)
     n_wh = sum(p["warehouse_candidate"] for p in places)
-    print(f"Saved {len(places)} places ({n_wh} warehouse candidates), {len(towns)} towns, "
-          f"{len(crossings)} crossings to {out}", file=sys.stderr)
+    print(f"Saved {len(places)} places ({len(buildings)} buildings, {n_wh} warehouse candidates), "
+          f"{len(towns)} towns, {len(crossings)} crossings, road graph {len(roads['lat'])} nodes / "
+          f"{len(roads['u'])} edges to {out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

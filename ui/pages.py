@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import math
 
+import datetime as dt
+import random
+
 import altair as alt
+import numpy as np
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 from shapely.geometry import Polygon
 
 from src.models import Point
-from src.river import TWO_WHEELER, VAN, river_check
-from src.set_cover import greedy_set_cover
+from src.river import TWO_WHEELER, VAN
+from src.roads import VEHICLES, plan_route
+from src.set_cover import greedy_cover, greedy_set_cover
 from src.traces import (
     closest_pair_trace,
     convex_hull_trace,
@@ -103,6 +109,38 @@ def _set_centre(label: str) -> None:
     st.session_state["search_centre"] = label
 
 
+def _owner(c: Ctx) -> np.ndarray:
+    """Index of the warehouse nearest by road for every road node (-1 when unreachable)."""
+    own = np.argmin(c.hub_km, axis=0)
+    own[~np.isfinite(c.hub_km.min(axis=0))] = -1
+    return own
+
+
+def _reach_owner(c: Ctx, kept: list[Point], km: float) -> np.ndarray:
+    """For each road node, the nearest kept warehouse within ``km`` by road (-1 otherwise)."""
+    idx = [c.wh_index[w.id] for w in kept]
+    if not idx:
+        return np.full(c.road.n, -1)
+    sub = c.hub_km[idx] + c.wh_gaps[idx][:, None]
+    best = np.argmin(sub, axis=0)
+    own = np.array(idx)[best]
+    own[sub.min(axis=0) > km] = -1
+    return own
+
+
+def _zone_colours(c: Ctx) -> dict[int, str]:
+    return {i: style.zone_hex(i) for i in range(len(c.net.warehouses))}
+
+
+def _road_km_between(c: Ctx, a: Point, b: Point) -> float | None:
+    if not c.by_road:
+        return None
+    g = c.road
+    (na, nb), gaps = g.snap([a.x, b.x], [a.y, b.y])
+    d = g.from_sources([na], c.vehicle, "km")[0, nb]
+    return float(d + gaps[0] + gaps[1]) if np.isfinite(d) else None
+
+
 def _rows(items: list[tuple[str, str, str, str]]) -> str:
     """items: (colour, title, subtitle, right); ``right`` may hold trusted markup."""
     return "".join(
@@ -143,7 +181,7 @@ def network() -> None:
         {"label": "Service zones", "value": len(net.warehouses), "accent": ALGO["voronoi"],
          "sub": f"busiest: {c.wh_by_id[busiest].label} ({sizes[busiest]})" if busiest else ""},
         {"label": "Delivery stops", "value": len(net.customers), "accent": style.BRAND,
-         "sub": f"avg {fmt_km(avg)} to hub"},
+         "sub": f"avg {fmt_km(avg)} to hub {'by road' if c.by_road else ''}"},
         {"label": "Network reach", "value": f"{reach:.1f}", "unit": "km²", "accent": ALGO["hull"],
          "sub": f"{len(c.hull)} boundary stops"},
         {"label": "Closest stops", "value": fmt_km(c.pair[2]) if c.pair else "–", "accent": ALGO["pair"],
@@ -152,16 +190,21 @@ def network() -> None:
          "sub": f"of {len(net.customers)} customers"},
     ]
     if net.river is not None:
-        cross = river_check(net.customers, net.warehouses, c.assignment, net.river, VAN)
-        cards.append({"label": "Cross-river", "value": len(cross), "accent": RIVER,
-                      "sub": "customers whose hub is across the Hooghly"})
+        rv = net.river
+        cross = sum(1 for p in net.customers
+                    if rv.bank(p.x, p.y) != rv.bank(c.wh_by_id[c.assignment_straight[p.id]].x,
+                                                 c.wh_by_id[c.assignment_straight[p.id]].y))
+        moved = sum(1 for p in net.customers if c.assignment[p.id] != c.assignment_straight[p.id])
+        cards.append({"label": "Cross-river", "value": cross, "accent": RIVER,
+                      "sub": f"straight-line hub across the Hooghly · {moved} change hub by road"})
     else:
         cards.append({"label": "Area", "value": f"{net.region.area:.1f}", "unit": "km²", "accent": NEUTRAL,
                       "sub": "around the points"})
     style.kpis(cards)
 
     options = {
-        "zones": ":material/hexagon: Service zones",
+        "zones": ":material/hexagon: Service zones" + (" (by road)" if c.by_road else ""),
+        **({"voronoi": ":material/pentagon: Straight-line Voronoi"} if c.by_road else {}),
         "hull": ":material/pentagon: Network reach",
         "search": ":material/crop_free: Search area",
         "pairs": ":material/join_inner: Closest stops",
@@ -203,7 +246,8 @@ def network() -> None:
                 style.block('<div class="sdn-note sdn-muted">No customers inside this area. Try a bigger box.</div>')
 
         with t_zones:
-            style.heading("Voronoi service zones", ALGO["voronoi"], "nearest hub wins")
+            style.heading("Service zones by road" if c.by_road else "Voronoi service zones", ALGO["voronoi"],
+                          "nearest hub by road wins" if c.by_road else "nearest hub wins")
             top = max(sizes.values()) if sizes else 1
             rows = []
             for w in net.warehouses:
@@ -226,7 +270,9 @@ def network() -> None:
                     f'<div class="sdn-pair"><div class="end"><b>{p.label}</b><span>{esc(p.name)}</span></div>'
                     f'<div class="mid">{fmt_km(d)}</div><div class="end"><b>{q.label}</b><span>{esc(q.name)}</span></div></div>'
                     '<div class="sdn-note sdn-muted" style="margin-top:6px">The two stops in the whole region that are '
-                    'nearest each other: candidates for one shared delivery.</div>'
+                    'nearest each other: candidates for one shared delivery.'
+                    + (f' By road they are {fmt_km(rk)} apart.' if (rk := _road_km_between(c, p, q)) is not None else '')
+                    + '</div>'
                 )
             style.heading("Within each zone", ALGO["pair"], "proximity only, not routing")
             zp = sorted(c.zone_pairs.items(), key=lambda kv: kv[1][2])
@@ -241,9 +287,13 @@ def network() -> None:
         zone_tips = {w.id: (f"Zone {w.label}", w.name, f"{len(c.by_zone[w.id])} customers") for w in net.warehouses}
         fill = {p.id: rgb(colour_of[c.assignment[p.id]]) for p in net.customers}
         lyr = [L.city_mask(net)]
-        if "zones" in on:
+        if "voronoi" in on:
+            lyr.append(L.zones(net, c.regions, colour_of, zone_tips, alpha=26))
+        if "zones" in on and not c.by_road:
             lyr.append(L.zones(net, c.regions, colour_of, zone_tips))
         lyr += L.city_outline(net)
+        if "zones" in on and c.by_road:
+            lyr.append(L.road_lines(c.road, _owner(c), _zone_colours(c)))
         if "river" in on:
             lyr += L.river(net)
         if "hull" in on:
@@ -269,7 +319,8 @@ def network() -> None:
 
         st.pydeck_chart(L.deck(net, lyr), height=660, on_select="rerun", selection_mode="single-object",
                         key="netmap")
-        legend = [("Warehouse zone", colour_of[net.warehouses[0].id], "box")] if net.warehouses else []
+        legend = ([("Roads by nearest warehouse", colour_of[net.warehouses[0].id], "thick")] if c.by_road else
+                  [("Warehouse zone", colour_of[net.warehouses[0].id], "box")]) if net.warehouses else []
         legend += [("Network reach (convex hull)", ALGO["hull"], "line"),
                    ("Search area (KD-tree)", ALGO["kdtree"], "box"),
                    ("Closest stops", ALGO["pair"], "line")]
@@ -308,19 +359,41 @@ def _place_card(c: Ctx, p: Point) -> None:
 
 # ====================================================================== river
 
+def _river_rows(c: Ctx, mode: str) -> list[dict]:
+    """Customers whose straight-line hub is across the Hooghly, with the real road trip to it."""
+    g, net, rv = c.road, c.net, c.net.river
+    km, pred = g.from_sources(c.wh_nodes, mode, "km", predecessors=True)
+    ferry = {frozenset((a, b)): name for a, b, name in g.ferries}
+    rows = []
+    for i, p in enumerate(net.customers):
+        h = c.wh_by_id[c.assignment_straight[p.id]]
+        if rv.bank(p.x, p.y) == rv.bank(h.x, h.y):
+            continue
+        hi, node, gap = c.wh_index[h.id], int(c.cust_nodes[i]), float(c.cust_gaps[i])
+        every = km[:, node] + gap + c.wh_gaps
+        real = float(every[hi])
+        path = g.path(pred[hi], node) if math.isfinite(real) else []
+        via = next((ferry[frozenset((a, b))] for a, b in zip(path, path[1:]) if frozenset((a, b)) in ferry),
+                   "Ishwar Gupta Setu")
+        bi = int(np.argmin(every))
+        rows.append({"customer": p, "hub": h, "straight": math.hypot(p.x - h.x, p.y - h.y), "real": real,
+                     "best_hub": net.warehouses[bi], "best_real": float(every[bi]), "path": path, "via": via})
+    return rows
+
+
 def river() -> None:
     c = ctx()
     net = c.net
     colour_of = c.colour_of()
     _hero_for(
         c, "River crossing", 'Across the <span class="accent">Hooghly</span>',
-        "The five algorithms measure distance in straight lines. The Hooghly splits this region, so a customer "
-        "whose nearest warehouse <b>as the crow flies</b> is on the other bank can only be reached over a "
-        "<b>road bridge</b> or, on two wheels, by <b>ferry</b>. This page measures how far off the straight-line "
-        "plan is.",
+        "A straight-line (Voronoi) plan sends some customers to the warehouse nearest <b>as the crow flies</b>, "
+        "even when it is on the other bank. On real roads that trip has to cross the river over the "
+        "<b>Ishwar Gupta Setu</b> road bridge or, on two wheels, by <b>ferry</b>. This page routes every such "
+        "trip on the OpenStreetMap road network and measures how far off the straight-line plan is.",
     )
-    if net.river is None:
-        st.info("The river check needs the Kalyani region data. Uploaded CSV networks have no river.",
+    if net.river is None or not c.by_road:
+        st.info("The river check needs the Kalyani region data. Uploaded CSV networks have no river or roads.",
                 icon=":material/water:")
         return
     rv = net.river
@@ -329,7 +402,7 @@ def river() -> None:
         required=True, key="river_mode", label_visibility="collapsed",
     )
     vehicle, rule, kinds = MODES[mode]
-    rows = river_check(net.customers, net.warehouses, c.assignment, rv, kinds)
+    rows = _river_rows(c, mode)
     west = [p for p in net.customers if rv.bank(p.x, p.y) == 0]
     west_hubs = [w for w in net.warehouses if rv.bank(w.x, w.y) == 0]
     reachable = [r for r in rows if math.isfinite(r["real"])]
@@ -339,7 +412,7 @@ def river() -> None:
     avg_r = sum(r["real"] for r in reachable) / n if n else 0
     used: dict[str, int] = {}
     for r in reachable:
-        used[r["crossing"].name] = used.get(r["crossing"].name, 0) + 1
+        used[r["via"]] = used.get(r["via"], 0) + 1
     top = max(used, key=used.get) if used else "–"
 
     style.kpis([
@@ -348,12 +421,12 @@ def river() -> None:
         {"label": "Hub across the river", "value": len(rows), "accent": CRITICAL,
          "sub": "straight-line (Voronoi) choice"},
         {"label": "Straight line", "value": fmt_km(avg_s) if n else "–", "accent": NEUTRAL, "sub": "average, what Voronoi assumes"},
-        {"label": "Real trip", "value": fmt_km(avg_r) if n else "–", "accent": BRIDGE if mode == "van" else FERRY,
+        {"label": "Real road trip", "value": fmt_km(avg_r) if n else "–", "accent": BRIDGE if mode == "van" else FERRY,
          "sub": f"average, mostly via {top}" if n else "no crossing needed"},
         {"label": "Extra distance", "value": f"+{fmt_km(avg_r - avg_s)}" if n else "–", "accent": ALGO["hull"],
          "sub": f"+{100 * (avg_r - avg_s) / avg_s:.0f}% per trip" if n and avg_s else ""},
         {"label": "Better hub exists", "value": len(switch), "unit": f"of {len(rows)}" if rows else "", "accent": ALGO["kdtree"],
-         "sub": "closer once the river counts"},
+         "sub": "nearer by road"},
     ])
 
     map_col, side = st.columns([2.2, 1], gap="medium")
@@ -362,10 +435,10 @@ def river() -> None:
         if rows:
             style.block(
                 f'<div class="sdn-callout warn"><b>{len(rows)} customer{"s" if len(rows) != 1 else ""}</b> '
-                f'{"are" if len(rows) != 1 else "is"} assigned to a warehouse on the other bank. By '
-                f'{esc(vehicle.lower())} ({esc(rule)}: {esc(", ".join(names))}) the trip averages '
-                f'<b>{fmt_km(avg_r)}</b> instead of {fmt_km(avg_s)}. For <b>{len(switch)}</b> of them another warehouse '
-                'is actually nearer once the river is taken into account.</div>'
+                f'{"are" if len(rows) != 1 else "is"} nearest, as the crow flies, to a warehouse on the other bank. '
+                f'By {esc(vehicle.lower())} ({esc(rule)}, {esc(", ".join(names))}) the real road trip averages '
+                f'<b>{fmt_km(avg_r)}</b> instead of {fmt_km(avg_s)}. For <b>{len(switch)}</b> of them another '
+                'warehouse is nearer by road.</div>'
             )
         else:
             style.block('<div class="sdn-callout">Every customer\'s straight-line warehouse is on its own bank in '
@@ -375,11 +448,10 @@ def river() -> None:
         items = []
         for r in sorted(rows, key=lambda r: -(r["real"] - r["straight"])):
             cu, hub, best = r["customer"], r["hub"], r["best_hub"]
-            via = r["crossing"].name if r["crossing"] else "no crossing"
             change = f"→ better {best.label}" if best.id != hub.id else "keeps hub"
             right = (f'{fmt_km(r["real"])}<small>vs {fmt_km(r["straight"])}</small>' if math.isfinite(r["real"])
                      else "no route<small>by this mode</small>")
-            items.append((colour_of[hub.id], f"{cu.label} · {cu.name}", f"{hub.label} via {via} · {change}", right))
+            items.append((colour_of[hub.id], f"{cu.label} · {cu.name}", f"{hub.label} via {r['via']} · {change}", right))
         if items:
             style.block('<div class="sdn-list">' + _rows(items) + "</div>")
         st.space("small")
@@ -394,25 +466,229 @@ def river() -> None:
         affected = {r["customer"].id for r in rows}
         fill = {p.id: rgb(colour_of[c.assignment[p.id]], 255 if p.id in affected else 110) for p in net.customers}
         straight, real = [], []
+        g = c.road
         for r in reachable:
-            cu, hub, x = r["customer"], r["hub"], r["crossing"]
+            cu, hub = r["customer"], r["hub"]
             straight.append({"path": [cu.coords(), hub.coords()], "colour": "#64748B", "alpha": 170})
-            near, far = (x.a, x.b) if rv.bank(cu.x, cu.y) == 0 else (x.b, x.a)
-            real.append({"path": [cu.coords(), near, far, hub.coords()],
-                         "colour": BRIDGE if x.kind == "bridge" else FERRY, "alpha": 200,
+            ferry = r["via"] != "Ishwar Gupta Setu"
+            real.append({"path": [[hub.lon, hub.lat], *g.coords(r["path"]), [cu.lon, cu.lat]],
+                         "colour": FERRY if ferry else BRIDGE, "alpha": 210,
                          "tip": (f"{cu.name} → {hub.label}", f"straight line {fmt_km(r['straight'])}",
-                                 f"real trip {fmt_km(r['real'])} via {x.name}")})
-        lyr = [L.city_mask(net), L.zones(net, c.regions, colour_of, {}, alpha=20), *L.city_outline(net),
-               *L.river(net), L.route_paths(net, straight, "straight", width=1.6, dashed=True),
-               L.route_paths(net, real, "real", width=2.6),
+                                 f"real road trip {fmt_km(r['real'])} via {r['via']}")})
+        lyr = [L.city_mask(net), L.road_lines(g, _owner(c), _zone_colours(c), alpha=70, width=1.6),
+               *L.city_outline(net), *L.river(net), L.route_paths(net, straight, "straight", width=1.6, dashed=True),
+               L.lonlat_paths(real, "real", width=3),
                L.customers(net, net.customers, fill, {p.id: place_tip(c, p) for p in net.customers}),
                L.rings_at(net, [r["customer"] for r in rows], CRITICAL, "affected", px=8, width=2.2) if rows else None,
                *L.crossings(net, kinds)]
         lyr += L.warehouses(net, net.warehouses, colour_of, {w.id: place_tip(c, w) for w in net.warehouses})
         st.pydeck_chart(L.deck(net, lyr), height=660, key=f"rivermap_{mode}")
         style.legend([("Hub across the river", CRITICAL, "ring"), ("Straight line (what Voronoi assumes)", "#64748B", "dash"),
-                      ("Real trip via bridge", BRIDGE, "line"), ("Real trip via ferry", FERRY, "line"),
+                      ("Real road trip over the bridge", BRIDGE, "line"), ("Real road trip using a ferry", FERRY, "line"),
                       ("Road bridge", BRIDGE, "thick"), ("Ferry", FERRY, "dash")])
+
+
+# ====================================================================== routing
+
+PRODUCTS = ["Medicines", "Groceries", "Electronics", "Books and stationery", "Clothing", "Hardware", "Dairy",
+            "Home appliances"]
+
+
+def _stock(c: Ctx) -> dict[str, list[int]]:
+    """Which warehouses stock each product (seeded, so the same network always has the same stock)."""
+    hubs = c.net.warehouses
+    rng = random.Random(st.session_state.get("seed", 42) * 31 + len(hubs))
+    held = {w.id: set(rng.sample(PRODUCTS, k=rng.randint(3, 5))) for w in hubs}
+    for prod in PRODUCTS:
+        if not any(prod in h for h in held.values()):
+            held[rng.choice(hubs).id].add(prod)
+    return {prod: [w.id for w in hubs if prod in held[w.id]] for prod in PRODUCTS}
+
+
+def _random_orders(n: int = 5) -> None:
+    c = ctx()
+    rng = random.Random()
+    st.session_state["rt_stops"] = sorted(p.id for p in rng.sample(c.net.customers, k=min(n, len(c.net.customers))))
+
+
+def _clear_orders() -> None:
+    st.session_state["rt_stops"] = []
+
+
+def _along(coords: list[list[float]], frac: float) -> list[float]:
+    """Point at ``frac`` (0..1) of the way along a lon/lat polyline (planar, fine at street scale)."""
+    if len(coords) == 1 or frac <= 0:
+        return coords[0]
+    seg = [math.dist(a, b) for a, b in zip(coords, coords[1:])]
+    target, run = frac * sum(seg), 0.0
+    for (a, b), d in zip(zip(coords, coords[1:]), seg):
+        if run + d >= target and d > 0:
+            t = (target - run) / d
+            return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+        run += d
+    return coords[-1]
+
+
+def _route_kpis(c: Ctx, route, seq: list[int], product: str, depot: Point, closed: bool,
+                t0: dt.datetime, finish: dt.datetime, straight: float) -> None:
+    mins = route.minutes
+    style.kpis([
+        {"label": "Stops", "value": len(seq), "accent": style.BRAND, "sub": product},
+        {"label": "Start", "value": depot.label, "accent": c.colour_of()[depot.id], "sub": depot.name},
+        {"label": "Road distance", "value": f"{route.km:.1f}", "unit": "km", "accent": ALGO["kdtree"],
+         "sub": f"straight line would be {straight:.1f} km"},
+        {"label": "Total time", "value": f"{int(mins // 60)} h {int(mins % 60):02d}" if mins >= 60 else f"{mins:.0f}",
+         "unit": "" if mins >= 60 else "min", "accent": ALGO["hull"], "sub": "riding, walking and hand-overs"},
+        {"label": "Back at base" if closed else "Last drop at", "value": finish.strftime("%H:%M"),
+         "accent": ALGO["pair"], "sub": f"dispatched {t0.strftime('%H:%M')}"},
+        {"label": "Visiting order", "value": "exact" if route.method.startswith("Held") else "heuristic",
+         "accent": ALGO["cover"], "sub": route.method},
+    ])
+
+
+def routing() -> None:
+    c = ctx()
+    net = c.net
+    colour_of = c.colour_of()
+    _hero_for(
+        c, "Route planner", 'Plan a delivery <span class="accent">on real roads</span>',
+        "Pick a product and the places that need it. The planner chooses the warehouse that stocks it and "
+        "finds the <b>fastest route on the OpenStreetMap road network</b> (Dijkstra). The visiting order is "
+        "exact for up to 10 stops (Held-Karp dynamic programming) and uses nearest neighbour with 2-opt above "
+        "that. Click customers on the map to add them.",
+    )
+    if not c.by_road:
+        st.info("Route planning needs the Kalyani road network. Switch the data source back to Kalyani region.",
+                icon=":material/route:")
+        return
+    g, hubs, custs = c.road, net.warehouses, net.customers
+    cust_by_id, cust_pos = c.cust_by_id, {p.id: i for i, p in enumerate(custs)}
+
+    # a customer clicked on the map is added to the stops (before the multiselect is drawn)
+    picked = _selected(c, "rtmap")
+    if picked is not None and picked.kind == "customer" and st.session_state.get("_rt_last") != picked.id:
+        st.session_state["_rt_last"] = picked.id
+        cur = list(st.session_state.get("rt_stops", []))
+        if picked.id not in cur and len(cur) < 25:
+            st.session_state["rt_stops"] = cur + [picked.id]
+    if "rt_stops" not in st.session_state or any(s not in cust_by_id for s in st.session_state["rt_stops"]):
+        rng = random.Random(st.session_state.get("seed", 42))
+        st.session_state["rt_stops"] = sorted(p.id for p in rng.sample(custs, k=min(5, len(custs))))
+
+    stock = _stock(c)
+    kpi_slot = st.container()
+    side, map_col = st.columns([1, 2.2], gap="medium")
+    with side:
+        product = st.selectbox("Product needed", PRODUCTS, key="rt_product")
+        holders = stock[product]
+        style.block('<div class="sdn-note">In stock at ' + ", ".join(
+            f'<b style="color:{colour_of[h]}">{c.wh_by_id[h].label}</b>' for h in holders) + "</div>")
+        stops = st.multiselect("Deliver to", [p.id for p in custs], key="rt_stops", max_selections=25,
+                               format_func=lambda i: f"{cust_by_id[i].label} · {cust_by_id[i].name}",
+                               placeholder="Search customers, or click them on the map")
+        b1, b2 = st.columns(2)
+        b1.button("Random", icon=":material/casino:", on_click=_random_orders, width="stretch",
+                  help="Replace the stops with 5 random customers")
+        b2.button("Clear", icon=":material/close:", on_click=_clear_orders, width="stretch")
+        if st.session_state.get("rt_start", "auto") not in ["auto"] + holders:
+            st.session_state["rt_start"] = "auto"
+        start = st.selectbox("Start from", ["auto"] + holders, key="rt_start",
+                             format_func=lambda h: "Best warehouse with stock (auto)" if h == "auto"
+                             else f"{c.wh_by_id[h].label} · {c.wh_by_id[h].name}")
+        closed = st.toggle("Return to the warehouse at the end", value=True, key="rt_return")
+        now = dt.datetime.now(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+        dispatch = st.time_input("Dispatch at", value=dt.time(now.hour, (now.minute // 5) * 5), key="rt_time",
+                                step=300)
+        style.block(f'<div class="sdn-note sdn-muted">Vehicle {esc(VEHICLES[c.vehicle].lower())} (change it in '
+                    'the sidebar). Speeds follow the road type, plus 3 min per hand-over and the walk from the '
+                    'road to each door.</div>')
+
+    depots = [h for h in holders] if start == "auto" else [start]
+    d_idx = [c.wh_index[h] for h in depots]
+    s_idx = [cust_pos[i] for i in stops]
+    route = plan_route(g, c.wh_nodes[d_idx], c.wh_gaps[d_idx], c.cust_nodes[s_idx], c.cust_gaps[s_idx],
+                       c.vehicle, closed) if stops else None
+
+    if route is None:
+        with map_col:
+            st.info("Add at least one delivery location to plan a route.", icon=":material/add_location:")
+        return
+    depot = c.wh_by_id[depots[route.depot]]
+    seq = [stops[o] for o in route.order]
+    t0 = dt.datetime.combine(dt.date.today(), dispatch)
+    finish = t0 + dt.timedelta(minutes=route.minutes)
+    straight = sum(math.dist(a, b) for a, b in zip(
+        [depot.coords()] + [cust_by_id[i].coords() for i in seq],
+        [cust_by_id[i].coords() for i in seq] + ([depot.coords()] if closed else [])))
+    with kpi_slot:
+        _route_kpis(c, route, seq, product, depot, closed, t0, finish, straight)
+
+    # ------------------------------------------------------------ itinerary + live tracking
+    elapsed = 0.0
+    timeline = []  # (leg, start_min, end_min, coords)
+    for leg in route.legs:
+        coords = g.coords(leg.nodes)
+        timeline.append((leg, elapsed, elapsed + leg.minutes, coords))
+        elapsed += leg.minutes
+    with side:
+        top = int(math.ceil(route.minutes))
+        if st.session_state.get("rt_live", 0) > top:
+            st.session_state["rt_live"] = top
+        live = st.slider("Live tracking, minutes since dispatch", 0, top, key="rt_live",
+                         help="Move the rider along the route to see what has been delivered by then")
+        style.heading("Itinerary", style.BRAND, f"{route.km:.1f} km")
+        rows = []
+        for n, (leg, s0, s1, _) in enumerate(timeline, 1):
+            to = cust_by_id[stops[leg.end - 1]] if leg.end else depot
+            eta = (t0 + dt.timedelta(minutes=s1)).strftime("%H:%M")
+            done = live >= s1
+            via = ", ".join(leg.roads[:3]) or "local roads"
+            rows.append((ALGO["kdtree"] if done else (colour_of[depot.id] if not leg.end else style.BRAND),
+                         f"{n if leg.end else '↩'} · {to.name or to.label}",
+                         f"{leg.km:.1f} km · {leg.minutes:.0f} min · via {via}",
+                         f"{eta}<small>{'delivered' if done and leg.end else ('back' if done else 'ETA')}</small>"))
+        style.block('<div class="sdn-list" style="max-height:420px">' + _rows(rows) + "</div>")
+
+    with map_col:
+        rider = timeline[-1][3][-1]
+        travelled, ahead = [], []
+        for leg, s0, s1, coords in timeline:
+            if live >= s1:
+                travelled.append({"path": coords, "colour": style.BRAND})
+            elif live <= s0:
+                ahead.append({"path": coords, "colour": style.BRAND, "alpha": 110})
+            else:
+                frac = (live - s0) / max(s1 - s0, 1e-9)
+                rider = _along(coords, frac)
+                cut = max(1, int(round(frac * (len(coords) - 1))))
+                travelled.append({"path": coords[:cut] + [rider], "colour": style.BRAND})
+                ahead.append({"path": [rider] + coords[cut:], "colour": style.BRAND, "alpha": 110})
+        if live <= 0:
+            rider = [depot.lon, depot.lat]
+        dim = {p.id: [148, 163, 184, 120] for p in custs}
+        order_pts = [([cust_by_id[i].lon, cust_by_id[i].lat], str(k + 1),
+                      ALGO["kdtree"] if live >= timeline[k][2] else style.BRAND) for k, i in enumerate(seq)]
+        tips = {p.id: place_tip(c, p) for p in custs}
+        lyr = [L.city_mask(net), *L.city_outline(net), *L.river(net), *L.crossings(net),
+               L.customers(net, custs, dim, tips, radius_m=18),
+               L.lonlat_paths(ahead, "route-ahead", width=4, dashed=True),
+               L.lonlat_paths([{**p, "colour": "#FFFFFF", "alpha": 255} for p in travelled], "route-casing", width=8),
+               L.lonlat_paths(travelled, "route-done", width=5),
+               *L.numbered_stops(order_pts),
+               L.rings_at(net, [depot], colour_of[depot.id], "depot-ring", px=16, width=3)]
+        lyr += L.warehouses(net, hubs, colour_of, {w.id: place_tip(c, w) for w in hubs},
+                            dimmed={w.id for w in hubs if w.id not in holders})
+        lyr.append(pdk.Layer("ScatterplotLayer", id="rider", data=[{"pos": rider}], get_position="pos",
+                             get_fill_color=[255, 255, 255, 255], get_line_color=rgb(CRITICAL), stroked=True,
+                             line_width_min_pixels=4, get_radius=50, radius_min_pixels=9, radius_max_pixels=14))
+        xs = [cust_by_id[i].x for i in seq] + [depot.x]
+        ys = [cust_by_id[i].y for i in seq] + [depot.y]
+        view = L.view_state(net, 760, 680, (min(xs), max(xs), min(ys), max(ys)), pad=0.18)
+        st.pydeck_chart(L.deck(net, lyr, view), height=680, on_select="rerun", selection_mode="single-object",
+                        key="rtmap")
+        style.legend([("Route still to ride", style.BRAND, "dash"), ("Route ridden", style.BRAND, "thick"),
+                      ("Delivered stop", ALGO["kdtree"], "dot"), ("Rider now", CRITICAL, "ring"),
+                      ("Warehouse without this product (grey)", NEUTRAL, "dot"), ("Ferry", FERRY, "dash")])
 
 
 # ====================================================================== coverage
@@ -423,13 +699,26 @@ def coverage() -> None:
     colour_of = c.colour_of()
     _hero_for(
         c, "Coverage planner", 'Which warehouses are <span class="accent">worth keeping?</span>',
-        "Every warehouse covers the customers within a chosen radius. Finding the fewest warehouses that "
-        "cover everyone is NP-hard, so we pick greedily: each round keeps the warehouse that covers the most "
-        "customers not yet covered. The result is at most about ln&nbsp;n times the true minimum.",
+        "Every warehouse covers the customers it can reach within a chosen distance "
+        + ("<b>along the roads</b>" if c.by_road else "as the crow flies")
+        + ". Finding the fewest warehouses that cover everyone is NP-hard, so we pick greedily: each round "
+        "keeps the warehouse that covers the most customers not yet covered. The result is at most about "
+        "ln&nbsp;n times the true minimum.",
     )
-    radius = st.slider("Coverage radius (km)", 1.0, 10.0, 4.0, 0.5, key="cover_r",
-                       help="How far a warehouse can serve from, as the crow flies.")
-    chosen, rounds = greedy_set_cover(net.warehouses, net.customers, radius)
+    radius = st.slider("Coverage distance (km)", 1.0, 10.0, 4.0, 0.5, key="cover_r",
+                       help="How far a warehouse can serve, measured along the roads for the chosen vehicle."
+                       if c.by_road else "How far a warehouse can serve from, as the crow flies.")
+    if c.by_road:
+        sets = {w.id: {p.id for i, p in enumerate(net.customers) if c.cust_road_km[wi, i] <= radius}
+                for wi, w in enumerate(net.warehouses)}
+        picks = greedy_cover({p.id for p in net.customers}, sets)
+        chosen, rounds, total = [], [], 0
+        for wid, new in picks:
+            total += len(new)
+            chosen.append(c.wh_by_id[wid])
+            rounds.append({"site": c.wh_by_id[wid], "new_covered": new, "total_covered": total})
+    else:
+        chosen, rounds = greedy_set_cover(net.warehouses, net.customers, radius)
     covered_by: dict[int, int] = {}
     for r in rounds:
         for cid in r["new_covered"]:
@@ -443,7 +732,8 @@ def coverage() -> None:
          "accent": ALGO["kdtree"], "sub": f"{covered} of {n}"},
         {"label": "Not covered", "value": n - covered, "accent": CRITICAL,
          "sub": "outside every radius" if n - covered else "everyone is reachable"},
-        {"label": "Radius", "value": f"{radius:.1f}", "unit": "km", "accent": NEUTRAL, "sub": "straight-line"},
+        {"label": "Reach", "value": f"{radius:.1f}", "unit": "km", "accent": NEUTRAL,
+         "sub": "along the roads" if c.by_road else "straight-line"},
         {"label": "Greedy rounds", "value": len(rounds), "accent": ALGO["pair"], "sub": "one pick per round"},
         {"label": "Guarantee", "value": f"≤ {sum(1 / k for k in range(1, max(n, 1) + 1)):.1f}×", "accent": ALGO["hull"],
          "sub": "H(n) × optimum"},
@@ -485,15 +775,18 @@ def coverage() -> None:
         chosen_ids = {w.id for w in chosen}
         lyr = [
             L.city_mask(net), *L.city_outline(net), *L.river(net),
-            L.circles(net, [(w, colour_of[w.id]) for w in chosen], radius, "cover"),
-            L.circles(net, [(w, NEUTRAL) for w in net.warehouses if w.id not in chosen_ids], radius, "cover-off", 0),
+            *([L.road_lines(c.road, _reach_owner(c, chosen, radius), _zone_colours(c), "cover-roads", width=2.6)]
+              if c.by_road else
+              [L.circles(net, [(w, colour_of[w.id]) for w in chosen], radius, "cover"),
+               L.circles(net, [(w, NEUTRAL) for w in net.warehouses if w.id not in chosen_ids], radius, "cover-off", 0)]),
             L.customers(net, net.customers, fill, tips),
             L.rings_at(net, uncovered, CRITICAL, "uncovered", px=8, width=2.2) if uncovered else None,
         ]
         lyr += L.warehouses(net, net.warehouses, colour_of, {w.id: place_tip(c, w) for w in net.warehouses},
                             dimmed={w.id for w in net.warehouses if w.id not in chosen_ids})
         st.pydeck_chart(L.deck(net, lyr), height=600, key="covermap")
-        style.legend([("Kept warehouse, its radius", ALGO["cover"], "box"),
+        style.legend([(("Roads a kept warehouse reaches" if c.by_road else "Kept warehouse, its radius"),
+                       ALGO["cover"], "thick" if c.by_road else "box"),
                       ("Could close (outline only)", NEUTRAL, "line"),
                       ("Customer not covered", CRITICAL, "dot")])
 
@@ -717,7 +1010,7 @@ def data() -> None:
     colour_of = c.colour_of()
     _hero_for(c, "Data", 'The <span class="accent">point set</span> behind the map',
               "Every warehouse and customer, the OpenStreetMap place it stands for, its position on the flat "
-              "km grid the algorithms use, and the zone it was assigned to.")
+              "km grid the algorithms use, the zone it was assigned to and how far its warehouse is.")
     rows = []
     for p in net.warehouses + net.customers:
         zone = p.label if p.kind == "warehouse" else c.wh_by_id[c.assignment[p.id]].label
@@ -725,6 +1018,8 @@ def data() -> None:
             "Label": p.label, "Name": p.name, "Type": p.kind, "Category": p.category, "Zone": zone,
             "Bank": ("" if net.river is None else ("west" if net.river.bank(p.x, p.y) == 0 else "east")),
             "To hub (m)": None if p.kind == "warehouse" else round(c.dist_to_hub[p.id] * 1000),
+            "Straight line (m)": None if p.kind == "warehouse" else round(math.dist(
+                p.coords(), c.wh_by_id[c.assignment[p.id]].coords()) * 1000),
             "x (km)": round(p.x, 3), "y (km)": round(p.y, 3), "Latitude": p.lat, "Longitude": p.lon,
         })
     df = pd.DataFrame(rows)
@@ -735,7 +1030,7 @@ def data() -> None:
         st.dataframe(
             df, hide_index=True, height=520, width="stretch",
             column_config={
-                "To hub (m)": st.column_config.ProgressColumn("To hub", format="%d m", min_value=0, max_value=int(far) or 1),
+                "To hub (m)": st.column_config.ProgressColumn("To hub by road" if c.by_road else "To hub", format="%d m", min_value=0, max_value=int(far) or 1),
                 "Latitude": st.column_config.NumberColumn(format="%.5f"),
                 "Longitude": st.column_config.NumberColumn(format="%.5f"),
             },
@@ -784,9 +1079,10 @@ def data() -> None:
 
 def about() -> None:
     c = ctx()
-    _hero_for(c, "How it works", 'Five algorithms, <span class="accent">one map</span>',
+    _hero_for(c, "How it works", 'Five algorithms, <span class="accent">one map</span>, real roads',
               "Voronoi decides who serves whom, the KD-tree finds what is where, closest pair finds what is near, "
-              "the hull shows how far it all reaches, and set cover picks the sites worth keeping.", team=True)
+              "the hull shows how far it all reaches, and set cover picks the sites worth keeping. Distances to "
+              "warehouses and delivery routes follow the OpenStreetMap road network.", team=True)
     cards = [
         ("voronoi", "Voronoi diagram", "Which warehouse serves each area?",
          "Each warehouse owns the part of the region closer to it than to any other. Customers are assigned "
@@ -809,7 +1105,13 @@ def about() -> None:
                   "The Hooghly splits the region. For every customer whose nearest hub is on the other bank, the "
                   "real trip must use a road bridge or a ferry; we measure the detour and the hub that is really "
                   "nearest.", "O(n · m · c) for c crossings"))
-    accent = {**ALGO, "river": RIVER}
+    cards.append(("road", "Road network and route planner", "Which way should the rider go?",
+                  "Every place is snapped to its nearest road node with a KD-tree. Dijkstra on the OpenStreetMap "
+                  "road graph (bridges, and ferries for two-wheelers) gives road distances, the nearest hub by road "
+                  "and the fastest path between stops. The visiting order is exact by Held-Karp dynamic programming "
+                  "up to 10 stops, and nearest neighbour improved by 2-opt above that.",
+                  "Dijkstra O(E log V) · Held-Karp O(2ᵏ k²)"))
+    accent = {**ALGO, "river": RIVER, "road": style.BRAND}
     style.block('<div class="sdn-algos">' + "".join(
         f'<div class="sdn-algo" style="--accent:{accent[k]}"><div class="k"><i></i>{esc(q)}</div><h4>{esc(t)}</h4>'
         f'<p>{esc(body)}</p><span class="cx">{esc(cx)}</span></div>' for k, t, q, body, cx in cards) + "</div>")
@@ -822,20 +1124,20 @@ def about() -> None:
             '<div class="sdn-note"><ol style="margin:0 0 0 18px;padding:0;line-height:1.75">'
             '<li>Define the study area: the convex hull of Kalyani, Naihati, Chakdaha, Mogra and Haringhata, '
             'padded by 2.5 km (about 400 km², both banks of the Hooghly).</li>'
-            '<li>Download every named place inside it, the Hooghly, its road bridges and its ferries from '
-            'OpenStreetMap (<code>scripts/fetch_osm.py</code>).</li>'
+            '<li>Download every named place and building inside it, the drivable roads, the Hooghly, its road '
+            'bridges and its ferries from OpenStreetMap (<code>scripts/fetch_osm.py</code>).</li>'
             '<li>Pick random real places: a few become warehouses (markets, post offices, warehouses and industrial '
-            'sites first, kept several km apart); the rest become customers.</li>'
+            'sites first, kept several km apart); the rest, mostly homes, become customers.</li>'
             '<li>Project latitude/longitude onto a flat km grid, so every distance is real metres, run the '
             'algorithms there and draw the results back on the street map.</li></ol></div>'
         )
     with b:
         style.heading("Scope and limits", ALGO["voronoi"])
         style.block(
-            '<div class="sdn-note"><b>A decision-support tool, not a routing system:</b> no traffic, fuel, GPS '
-            'navigation or driver scheduling. The algorithms use straight lines, not roads; the river check is the one '
-            'place where real geography (bridges and ferries) is modelled, and it is still straight-line on each bank. '
-            'OpenStreetMap maps only a few ferry ghats here, so one far landing is estimated; known ghats can be '
+            '<div class="sdn-note"><b>A decision-support tool, not a navigation app:</b> no live traffic, fuel, '
+            'turn restrictions or driver shifts. Road distances and routes use the OpenStreetMap road graph with '
+            'typical speeds per road type; the hull, closest pair and KD-tree stay geometric (straight line), and '
+            'the straight-line Voronoi is kept for comparison. OpenStreetMap maps only a few ferry ghats here, so one far landing is estimated; known ghats can be '
             'added in <code>data/manual/ferries.csv</code>. The places are random real OSM features standing in for '
             'customers, and OSM coverage is uneven, so some neighbourhoods have few named places.</div>'
         )
