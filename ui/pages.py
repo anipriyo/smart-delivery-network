@@ -28,7 +28,7 @@ from src.traces import (
 )
 
 from . import layers as L
-from . import style
+from . import pseudo, style
 from .state import Ctx, csv_bytes, place_tip, region
 from .style import ALGO, BRIDGE, CRITICAL, FERRY, INK, RIVER, esc, fmt_km, rgb
 
@@ -139,6 +139,15 @@ def _road_km_between(c: Ctx, a: Point, b: Point) -> float | None:
     (na, nb), gaps = g.snap([a.x, b.x], [a.y, b.y])
     d = g.from_sources([na], c.vehicle, "km")[0, nb]
     return float(d + gaps[0] + gaps[1]) if np.isfinite(d) else None
+
+
+def _explain(key: str, accent: str, title: str) -> None:
+    """The algorithm in plain words beside its pseudocode."""
+    a, b = st.columns(2, gap="medium")
+    with a:
+        pseudo.words_card(key, accent, title)
+    with b:
+        pseudo.code_card(key, accent)
 
 
 def _rows(items: list[tuple[str, str, str, str]]) -> str:
@@ -689,6 +698,7 @@ def routing() -> None:
         style.legend([("Route still to ride", style.BRAND, "dash"), ("Route ridden", style.BRAND, "thick"),
                       ("Delivered stop", ALGO["kdtree"], "dot"), ("Rider now", CRITICAL, "ring"),
                       ("Warehouse without this product (grey)", NEUTRAL, "dot"), ("Ferry", FERRY, "dash")])
+    _explain("route", style.BRAND, "How the route is planned")
 
 
 # ====================================================================== coverage
@@ -789,6 +799,7 @@ def coverage() -> None:
                        ALGO["cover"], "thick" if c.by_road else "box"),
                       ("Could close (outline only)", NEUTRAL, "line"),
                       ("Customer not covered", CRITICAL, "dot")])
+    _explain("cover", ALGO["cover"], "Greedy set cover in words")
 
 
 # ====================================================================== walkthrough
@@ -877,9 +888,7 @@ def walkthrough() -> None:
                        _chain([p.label for p in chain], {cust_by_id[s["current"]].label}))
             if i == len(steps):
                 st.success(f"Hull of {len(hull_pts)} stops: " + " → ".join(p.label for p in hull_pts), icon=":material/check_circle:")
-            style.block('<div class="sdn-note sdn-muted" style="margin-top:8px">Points are scanned west to east for the '
-                        'lower chain, then east to west for the upper chain. A point is dropped whenever keeping it '
-                        'would make a right turn (a dent in the boundary).</div>')
+            pseudo.code_card("hull", accent, pseudo.lines_for("hull", s))
             order = sorted(set(custs), key=lambda p: (p.x, p.y))
             if s["chain"] == "upper":
                 order = list(reversed(order))
@@ -902,9 +911,7 @@ def walkthrough() -> None:
             _step_card(i, len(steps), f'{s["event"]} · depth {s["depth"]}', accent, s["detail"])
             if i == len(steps):
                 st.success(f"Closest pair: {bp.label} and {bq.label}, {fmt_km(bd)} apart", icon=":material/check_circle:")
-            style.block('<div class="sdn-note sdn-muted" style="margin-top:8px">Split the stops by a north-south line, '
-                        'solve each half, then only re-check the thin strip of width 2δ around the line. Inside the '
-                        'strip each point needs comparing with just a few neighbours above it.</div>')
+            pseudo.code_card("pair", accent, pseudo.lines_for("pair", s))
             active = [cust_by_id[j] for j in s["active_ids"]]
             lyr.append(_base_points(c, custs, dim))
             if s["event"] == "divide":
@@ -930,9 +937,8 @@ def walkthrough() -> None:
             i = _step_nav("wk_kdb", len(steps))
             s = steps[i - 1]
             _step_card(i, len(steps), f'split on {s["axis"]} · depth {s["depth"]}', accent, s["detail"])
-            style.block('<div class="sdn-note sdn-muted" style="margin-top:8px">Each split cuts its cell in half at the '
-                        'median stop, alternating north-south and east-west lines. The tree ends up about '
-                        f'log₂ n ≈ {math.ceil(math.log2(max(len(custs), 2)))} levels deep.</div>')
+            pseudo.code_card("kdbuild", accent, pseudo.lines_for("kdbuild", s),
+                             f"Pseudocode · about {math.ceil(math.log2(max(len(custs), 2)))} levels deep")
             lyr.append(_base_points(c, custs, seen))
             old = [t["seg"] for t in steps[: i - 1]]
             if old:
@@ -955,6 +961,7 @@ def walkthrough() -> None:
                 f'skipped <b>{pruned}</b> subtree(s), found <b>{ninside}</b> so far. The search area is the one set '
                 'on the Network page.</div>'
             )
+            pseudo.code_card("kdquery", accent, pseudo.lines_for("kdquery", s))
             if i == len(steps):
                 st.success(f"{len(found)} customers in the area after visiting only {len(visited)} of {len(custs)}.",
                            icon=":material/check_circle:")
@@ -985,6 +992,7 @@ def walkthrough() -> None:
             if i == len(rows):
                 st.success(f"{p.label} belongs to zone {best.label}: it lies inside {best.label}'s Voronoi cell.",
                            icon=":material/check_circle:")
+            pseudo.code_card("voronoi", accent, pseudo.lines_for("voronoi", r))
             colour_of = c.colour_of()
             lyr.append(L.zones(net, c.regions, colour_of, {}, alpha=22))
             lyr.append(_base_points(c, custs, dim))
@@ -1000,6 +1008,7 @@ def walkthrough() -> None:
     with right:
         st.pydeck_chart(L.deck(net, lyr, L.points_view(net, custs + net.warehouses)), height=600,
                         key=f"wkmap_{algo}")
+        pseudo.words_card(algo, accent, f"{name} in words")
 
 
 # ====================================================================== data

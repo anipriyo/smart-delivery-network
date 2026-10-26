@@ -183,6 +183,23 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .sdn-chain span { font-size: 11.5px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--wash); border: 1px solid var(--line); color: var(--ink-2); }
 .sdn-chain span.on { background: var(--accent); color: #fff; border-color: transparent; }
 
+/* ---------- pseudocode + plain words ---------- */
+.sdn-code, .sdn-words { border-radius: 14px; border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow);
+                        padding: 12px 14px; margin-top: 10px; }
+.sdn-code .cap, .sdn-words .cap { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+                                  color: var(--accent); margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px;
+                                  justify-content: space-between; align-items: baseline; }
+.sdn-code .cap span { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; font-weight: 600;
+                      letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.sdn-code .ln { display: flex; gap: 10px; padding: 2px 6px; border-radius: 6px; border-left: 3px solid transparent;
+                font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.55; color: var(--ink); }
+.sdn-code .ln b { flex: none; width: 16px; text-align: right; font-weight: 500; color: var(--ink-3); }
+.sdn-code .ln span { overflow-wrap: anywhere; }
+.sdn-code .ln em { font-style: normal; color: var(--ink-3); }
+.sdn-code .ln.on { background: color-mix(in srgb, var(--accent) 12%, white); border-left-color: var(--accent); font-weight: 600; }
+.sdn-words ol { margin: 0 0 0 18px; padding: 0; }
+.sdn-words li { font-size: 13.5px; line-height: 1.6; color: var(--ink-2); margin-bottom: 4px; }
+
 /* ---------- timeline (Coverage) ---------- */
 .sdn-tl { display: flex; flex-direction: column; gap: 0; }
 .sdn-tl .it { display: grid; grid-template-columns: 26px 1fr; gap: 12px; position: relative; padding-bottom: 14px; }
