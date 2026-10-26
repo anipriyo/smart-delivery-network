@@ -336,10 +336,16 @@ def _place_card(c: Ctx, p: Point) -> None:
             )
         else:
             hub = c.wh_by_id[c.assignment[p.id]]
-            ranking = sorted(c.net.warehouses, key=lambda w: math.hypot(w.x - p.x, w.y - p.y))[:3]
+            if c.by_road:
+                i = next(k for k, q in enumerate(c.net.customers) if q.id == p.id)
+                dist = {w.id: float(c.cust_road_km[c.wh_index[w.id], i]) for w in c.net.warehouses}
+            else:
+                dist = {w.id: math.hypot(w.x - p.x, w.y - p.y) for w in c.net.warehouses}
+            ranking = sorted(c.net.warehouses, key=lambda w: dist[w.id])[:3]
+            way = " by road" if c.by_road else ""
             rows = _rows([(colour_of[w.id], f"{w.label} · {w.name}",
-                           "assigned: nearest hub" if w.id == hub.id else "farther away",
-                           fmt_km(math.hypot(w.x - p.x, w.y - p.y))) for w in ranking])
+                           f"assigned: nearest hub{way}" if w.id == hub.id else "farther away",
+                           fmt_km(dist[w.id])) for w in ranking])
             style.block(
                 f'<div class="sdn-h" style="--accent:{colour_of[hub.id]}"><span class="dot"></span>{esc(p.name)}'
                 f'<span class="meta">{p.label}</span></div>'

@@ -44,8 +44,8 @@ BROWSERS = [
 
 TITLE = "Smart Delivery Network"
 TITLE_2 = "on Kalyani"
-SUBTITLE = ("Computational geometry and approximation algorithms for delivery planning "
-            "on real OpenStreetMap data, on both banks of the Hooghly")
+SUBTITLE = ("Computational geometry, shortest paths and route planning for deliveries "
+            "on the real OpenStreetMap road network, on both banks of the Hooghly")
 COURSE = "Algorithms II (CSC711) · Mini Project Report"
 TEAM = [("Akash Chakraborty", "1059", "CSE/23011"),
         ("Anipriyo Mandal", "1065", "CSE/23017"),
@@ -53,7 +53,8 @@ TEAM = [("Akash Chakraborty", "1059", "CSE/23011"),
 REPO = "https://github.com/anipriyo/smart-delivery-network"
 LIVE = "https://smart-delivery-network.streamlit.app"
 ALGOS = [("Voronoi", "#E11D48"), ("KD-tree", "#059669"), ("Closest pair", "#7C3AED"),
-         ("Convex hull", "#D97706"), ("Set cover", "#0891B2"), ("River check", "#2563EB")]
+         ("Convex hull", "#D97706"), ("Set cover", "#0891B2"), ("Dijkstra + routing", "#4F46E5"),
+         ("River check", "#2563EB")]
 
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -232,13 +233,15 @@ def cover(today: str) -> str:
 def toc(items: list[tuple[str, str]]) -> str:
     rows = "".join(f'<li><span class="n">{html.escape(n)}</span><span>{html.escape(t)}</span></li>' for n, t in items)
     return f"""<section class="toc"><h2>Contents</h2><ol>{rows}</ol>
-<div class="abstract"><b>Summary.</b> A delivery network around Kalyani, West Bengal, built from 571 real
-OpenStreetMap places in a 401 km² area on both banks of the Hooghly. Five Algorithms II techniques plan it, namely
-Voronoi zones (who serves whom), a KD-tree (what is where), divide-and-conquer closest pair (what is near),
-the convex hull (how far it reaches) and greedy set cover (which sites to keep), shown in an interactive
-Streamlit dashboard with step-by-step walkthroughs. A river check then measures where straight-line
-planning breaks. With one road bridge along 27.5 km of river, a van's real trip to a cross-river hub is
-more than twice the straight line.</div></section>"""
+<div class="abstract"><b>Summary.</b> A delivery network around Kalyani, West Bengal, built from 9,422 real
+OpenStreetMap places and 3,291 km of roads in a 401 km² area on both banks of the Hooghly. Five Algorithms II
+techniques plan it, namely Voronoi zones by road distance (who serves whom), a KD-tree (what is where),
+divide-and-conquer closest pair (what is near), the convex hull (how far it reaches) and greedy set cover by road
+(which sites to keep). A route planner finds the fastest round for a product to several places with Dijkstra and
+an exact Held-Karp order, or nearest neighbour with 2-opt for longer rounds. Everything is shown in an interactive
+Streamlit dashboard with step-by-step walkthroughs and pseudocode. With one road bridge along 27.5 km of river,
+a straight-line plan would send some customers across the water on a trip more than three times as long, which the
+road-based zones avoid.</div></section>"""
 
 
 def build_html(today: str) -> str:
@@ -248,7 +251,7 @@ def build_html(today: str) -> str:
     body = markdown.markdown(body_md, extensions=["tables", "fenced_code", "sane_lists", "attr_list"])
     # Start the main sections that open a new topic on a fresh page.
     for heading in ("1. Problem Statement", "3. Algorithms Used", "6. Worked Example", "7. Crossing the Hooghly",
-                    "Appendix A."):
+                    "8. Route Planner Example", "9. Testing", "Appendix A."):
         body = re.sub(rf"<h2>({re.escape(heading)}[^<]*)</h2>", r'<h2 class="new-page">\1</h2>', body, count=1)
     base = HERE.as_uri() + "/"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="{base}">

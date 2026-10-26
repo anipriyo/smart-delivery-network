@@ -28,7 +28,9 @@ from src.convex_hull import convex_hull  # noqa: E402
 from src.data import PRODUCTS, product_stock, sample_network  # noqa: E402
 from src.geo import latest_data_dir, load_region  # noqa: E402
 from src.kdtree import KDTree  # noqa: E402
-from src.roads import RoadGraph, best_order, held_karp, nearest_neighbour_2opt, plan_route  # noqa: E402
+from src.roads import (  # noqa: E402
+    RoadGraph, area_grid, grid_km, held_karp, nearest_neighbour_2opt, plan_route, zone_polygons,
+)
 from src.set_cover import greedy_cover, greedy_set_cover  # noqa: E402
 from src.traces import (  # noqa: E402
     closest_pair_trace,
@@ -163,21 +165,34 @@ ratios = [road[idx[straight_assign[c.id]], i] / max(math.dist(c.coords(), wh[str
 print(f"  road / straight-line ratio to the straight-line hub: median {statistics.median(ratios):.2f}, "
       f"mean {statistics.mean(ratios):.2f}, max {max(ratios):.2f}")
 
-regions = service_regions(hubs, net.region)
-print("\nZones by road (customers, Voronoi cell area, mean and farthest road distance to hub)")
+straight_cells = service_regions(hubs, net.region)
+grid = area_grid(g, net.region)
+t = time.perf_counter()
+gkm = grid_km(g, grid, g.from_sources(wn, VEHICLE, "km"), wg)
+regions = {hubs[i].id: z for i, z in zone_polygons(grid, np.argmin(gkm, axis=0), net.region).items()}
+print(f"\nVoronoi by road: {len(grid.node)} squares of {1000 * grid.cell:.0f} m, zones built in "
+      f"{1000 * (time.perf_counter() - t):.0f} ms (incl. Dijkstra)")
+inside = sum(1 for c in custs if regions[assignment[c.id]].buffer(1e-9).contains(
+    __import__("shapely.geometry", fromlist=["Point"]).Point(c.x, c.y)))
+print(f"  customers drawn inside their own zone: {inside} of {len(custs)}")
+print("Zones by road (customers, zone area by road vs straight-line cell, mean and farthest road distance)")
 for w in hubs:
     pts = [c for c in custs if assignment[c.id] == w.id]
     ds = [dist[c.id] for c in pts]
     sv = sum(1 for c in custs if straight_assign[c.id] == w.id)
     mean = m(sum(ds) / len(ds)) if ds else "-"
     far = m(max(ds)) if ds else "-"
-    print(f"  {w.label}: {len(pts):3d} customers by road ({sv} by straight line), cell {regions[w.id].area:6.2f} km², "
+    print(f"  {w.label}: {len(pts):3d} customers by road ({sv} by straight line), zone {regions[w.id].area:6.2f} km² "
+          f"(straight-line cell {straight_cells[w.id].area:6.2f} km²), "
           f"mean {mean}, farthest {far}")
-print(f"  cell areas sum to {sum(r.area for r in regions.values()):.2f} km² (area {net.region.area:.2f} km²)")
+print(f"  zone areas sum to {sum(r.area for r in regions.values()):.2f} km² (area {net.region.area:.2f} km²)")
+west_bank = rv.banks[0]
+print("  share of the west bank in each zone: " + ", ".join(
+    f"W{w.id} {100 * regions[w.id].intersection(west_bank).area / west_bank.area:.0f} %" for w in hubs))
 all_s = [math.dist(c.coords(), wh[straight_assign[c.id]].coords()) for c in custs]
 print(f"  average to hub: {m(sum(dist.values()) / len(custs))} by road, {m(sum(all_s) / len(all_s))} straight line")
 c1 = custs[0]
-rows = voronoi_assignment_trace(c1, hubs)
+rows = voronoi_assignment_trace(c1, hubs, road[:, 0])  # by road, as in the app
 print(f"  trace for {c1.label} ({c1.name}): "
       + ", ".join(f"W{r['warehouse']} {m(r['distance'])}" for r in rows)
       + f" -> zone W{rows[-1]['best_so_far']}")

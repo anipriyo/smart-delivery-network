@@ -4,16 +4,16 @@ The written project report and what it needs.
 
 | File | What it is | How it is produced |
 |---|---|---|
-| `report.md` | The report for the Kalyani region version of the dashboard (both banks of the Hooghly; rewritten 22 Oct 2026) | Written by hand. The numbers in §2, §6 and §7 come from `worked_example.py`. |
-| `worked_example.py` | Prints every number used in the report: region facts and the projection check (§2), the worked example (§6) and the river check by van and by two-wheeler (§7). Uses the app's defaults: seed 42, 5 warehouses, 80 customers, a 3.0 × 2.4 km search area around Kalyani City, and a 4 km radius. Keep these in step with `ui/state.py` and `ui/pages.py`. | `~/.venvs/analysis/bin/python report/worked_example.py` |
-| `screenshots/*.png` | Network map, River crossing (van mode), Coverage planner and Walkthrough (KD-tree search, final step), 1440 px wide, default settings, plus `map_closeup.png` (just the map at 2× resolution, used on the PDF cover and in the README) | `take_screenshots.py` (below) |
-| `take_screenshots.py` | Opens the running app in a headless Brave/Chrome with a throwaway profile, takes the four screenshots, closes the browser | see below |
-| `Smart_Delivery_Network_Report.pdf` | **The submission PDF** (20 pages, A4): cover with course, team and repository link, contents, the report with numbered figures, page numbers and PDF bookmarks | `build_pdf.py` (below) |
+| `report.md` | The report for the Kalyani region version of the dashboard (both banks of the Hooghly, road network, Voronoi zones by road, route planner; rewritten 26 Oct 2026) | Written by hand. The numbers in §2, §6, §7 and §8 come from `worked_example.py`. |
+| `worked_example.py` | Prints every number used in the report: region, road graph and projection facts (§2), the worked example with Voronoi zones by road (§6), the river check by road for van and two-wheeler (§7), and the Route planner example plus 2-opt against Held-Karp (§8). Uses the app's defaults: seed 42, 5 warehouses, 150 customers, a two-wheeler, a 3.0 × 2.4 km search area around Kalyani City, a 4 km coverage distance by road, and the Route planner's opening example. Keep these in step with `ui/state.py` and `ui/pages.py`. | `~/.venvs/analysis/bin/python report/worked_example.py` |
+| `screenshots/*.png` | Network map, Route planner, River crossing (van mode), Coverage planner and Walkthrough (KD-tree search, final step, with its pseudocode), 1440 px wide, default settings, plus `map_closeup.png` (just the map at 2× resolution, used on the PDF cover and in the README) | `take_screenshots.py` (below) |
+| `take_screenshots.py` | Opens the running app in a headless Brave/Chrome with a throwaway profile, takes the five screenshots, closes the browser | see below |
+| `Smart_Delivery_Network_Report.pdf` | **The submission PDF** (25 pages, A4): cover with course, team and repository link, contents, the report with numbered figures, page numbers and PDF bookmarks | `build_pdf.py` (below) |
 | `build_pdf.py` | Markdown → styled HTML (cover, contents, figure captions, print CSS) → PDF, printed by a headless Brave/Chrome over the DevTools protocol with a throwaway profile | see below |
 
 ## Commands (from the project root)
 
-Numbers for §2, §6 and §7:
+Numbers for §2, §6, §7 and §8:
 
 ```bash
 ~/.venvs/analysis/bin/python report/worked_example.py
