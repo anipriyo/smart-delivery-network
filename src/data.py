@@ -107,6 +107,23 @@ def sample_network(
     )
 
 
+PRODUCTS = ["Medicines", "Groceries", "Electronics", "Books and stationery", "Clothing", "Hardware", "Dairy",
+            "Home appliances"]
+
+
+def product_stock(warehouses: list[Point], seed: int) -> dict[str, list[int]]:
+    """Which warehouses stock each product: 3 to 5 products each, and every product somewhere.
+
+    Seeded, so the same network always has the same stock.
+    """
+    rng = random.Random(seed * 31 + len(warehouses))
+    held = {w.id: set(rng.sample(PRODUCTS, k=rng.randint(3, 5))) for w in warehouses}
+    for prod in PRODUCTS:
+        if not any(prod in h for h in held.values()):
+            held[rng.choice(warehouses).id].add(prod)
+    return {prod: [w.id for w in warehouses if prod in held[w.id]] for prod in PRODUCTS}
+
+
 def network_from_csv(file) -> Network:
     """Build a network from a CSV with columns type, lat, lon and optional name.
 

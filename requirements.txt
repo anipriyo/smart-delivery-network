@@ -1,7 +1,7 @@
 streamlit>=1.66  # tested with 1.66.1; uses top navigation, light/dark theme sections, pydeck selection
 pydeck>=0.9
 altair>=5
-shapely>=2.0
+shapely>=2.1  # coverage_simplify
 numpy>=1.26
 scipy>=1.11
 pandas>=2.0

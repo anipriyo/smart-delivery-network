@@ -20,7 +20,7 @@ from src.data import Network, network_from_csv, network_to_csv, sample_network
 from src.geo import Region, latest_data_dir, load_region
 from src.kdtree import KDTree
 from src.models import Point
-from src.roads import VEHICLES, RoadGraph
+from src.roads import VEHICLES, AreaGrid, RoadGraph, area_grid, grid_km, zone_polygons
 from src.voronoi import assign_customers, service_regions
 
 from . import style
@@ -56,6 +56,16 @@ def road_graph() -> RoadGraph | None:
 
 
 @st.cache_resource(show_spinner=False)
+def _area_grid(stamp: tuple) -> AreaGrid | None:
+    g = _road_graph(stamp)
+    return None if g is None else area_grid(g, _region(stamp).boundary_xy)
+
+
+def road_grid() -> AreaGrid | None:
+    return _area_grid(_data_stamp())
+
+
+@st.cache_resource(show_spinner=False)
 def _kalyani_network(n_warehouses: int, n_customers: int, seed: int, stamp: tuple) -> Network:
     return sample_network(_region(stamp), n_warehouses, n_customers, seed)
 
@@ -87,6 +97,8 @@ class Ctx:
     cust_gaps: np.ndarray | None = None
     hub_km: np.ndarray | None = None  # (warehouses x road nodes) road km for the current vehicle
     cust_road_km: np.ndarray | None = None  # (warehouses x customers) door-to-door road km
+    grid: AreaGrid | None = None  # 150 m cells over the area, for zones by road
+    grid_road_km: np.ndarray | None = None  # (warehouses x cells) road km
 
     @property
     def by_road(self) -> bool:
@@ -114,6 +126,7 @@ def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
     g = road_graph() if net.river is not None else None
     assignment, dist = dict(straight), {}
     extra: dict = {}
+    regions: dict[int, Polygon] = {}
     if g is not None and hubs and custs:
         wn, wg = g.snap([w.x for w in hubs], [w.y for w in hubs])
         cn, cg = g.snap([c.x for c in custs], [c.y for c in custs])
@@ -126,8 +139,13 @@ def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
             else:  # unreachable by road: fall back to the straight line
                 w = wh_by_id[straight[c.id]]
                 dist[c.id] = math.hypot(c.x - w.x, c.y - w.y)
+        grid = road_grid()
+        gkm = grid_km(g, grid, hub_km, wg)
+        owner = np.argmin(gkm, axis=0)
+        owner[~np.isfinite(gkm.min(axis=0))] = -1
+        regions = {hubs[i].id: z for i, z in zone_polygons(grid, owner, net.region).items()}
         extra = dict(road=g, wh_nodes=wn, wh_gaps=wg, cust_nodes=cn, cust_gaps=cg, hub_km=hub_km,
-                     cust_road_km=road)
+                     cust_road_km=road, grid=grid, grid_road_km=gkm)
     else:
         dist = {c.id: math.hypot(c.x - wh_by_id[a].x, c.y - wh_by_id[a].y) for c, a in
                 ((c, assignment[c.id]) for c in custs)} if hubs else {}
@@ -140,7 +158,7 @@ def compute(net: Network, source: str, vehicle: str = "bike") -> Ctx:
         net=net, source=source,
         wh_index={w.id: i for i, w in enumerate(hubs)},
         assignment=assignment,
-        regions=service_regions(hubs, net.region),
+        regions=regions if g is not None and hubs and custs else service_regions(hubs, net.region),
         hull=hull,
         hull_poly=Polygon([p.coords() for p in hull]) if len(hull) >= 3 else None,
         pair=closest_pair(custs) if len(custs) >= 2 else None,
@@ -197,6 +215,9 @@ def sidebar() -> Ctx:
                 "Delivery by", list(VEHICLES), format_func=VEHICLES.get, default="bike", required=True,
                 key="vehicle", width="stretch",
                 help="Road distances and routes use this vehicle. Two-wheelers may also take the Hooghly ferries.")
+            st.toggle("Show road paths on maps", value=False, key="show_roads",
+                      help="Distances always follow the roads. This only draws the street-by-street paths on the "
+                      "River crossing and Walkthrough maps. The Route planner always draws its route.")
         else:
             up = st.file_uploader("CSV with type, lat, lon, name", type="csv",
                                   help="type is warehouse or customer; up to 8 warehouses.")
@@ -224,7 +245,15 @@ def sidebar() -> Ctx:
         st.info("Upload a CSV in the sidebar to see your own network, or switch back to **Kalyani region**.",
                 icon=":material/upload_file:")
         st.stop()
-    return compute(net, source, st.session_state.get("vehicle", "bike") if net.river is not None else "bike")
+    if source == "Kalyani region":
+        return _kalyani_ctx(int(n_w), int(n_c), int(seed), st.session_state.get("vehicle", "bike"), _data_stamp())
+    return compute(net, source)
+
+
+@st.cache_resource(show_spinner=False, max_entries=12)
+def _kalyani_ctx(n_warehouses: int, n_customers: int, seed: int, vehicle: str, stamp: tuple) -> Ctx:
+    """Every algorithm's result for one Kalyani network, computed once and shared by all pages."""
+    return compute(_kalyani_network(n_warehouses, n_customers, seed, stamp), "Kalyani region", vehicle)
 
 
 def csv_bytes(ctx: Ctx) -> str:

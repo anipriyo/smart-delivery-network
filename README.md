@@ -22,9 +22,11 @@ Five Algorithms II techniques then plan the network:
 - The convex hull shows how far the network reaches.
 - Greedy set cover picks the sites worth keeping.
 
-Distances follow the **real road network** (121,678 OSM road nodes, Dijkstra),
-so each customer is served by the warehouse nearest **by road**, and coverage
-is measured along the roads. A **river check** shows where straight-line
+Distances follow the **real road network** (121,678 OSM road nodes, Dijkstra).
+The Voronoi service zones are computed by road distance (a network Voronoi
+diagram), so each part of the area belongs to the warehouse nearest **by
+road**, and coverage is measured along the roads too. The roads are used for
+the calculations only; a sidebar switch draws the road paths if wanted. A **river check** shows where straight-line
 planning breaks: customers whose nearest warehouse is across the Hooghly can
 only be reached over **Ishwar Gupta Setu** or, on two wheels, by **ferry**.
 
@@ -86,10 +88,10 @@ pytest tests/ -v
 
 | Page | What it shows |
 |---|---|
-| Network map | Service zones by road (and the straight-line Voronoi for comparison), convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
+| Network map | Voronoi service zones by road distance, convex hull (network reach), KD-tree search area, closest stops (region-wide and per zone), the Hooghly with its bridge and ferries. Click any dot to inspect it. |
 | Route planner | Pick a product and one or more delivery places (from the list, at random, or by clicking the map). The fastest road route from a warehouse that stocks it, with stop order, itinerary, ETAs and a live-tracking slider. |
 | River crossing | Customers whose straight-line warehouse is on the other bank; the real road trip via the bridge (van) or bridge + ferry (two-wheeler); the extra distance; and the hub that is really nearest by road. |
-| Coverage planner | Greedy set cover: which warehouses to keep for a given road distance, round by round. |
+| Coverage planner | Greedy set cover: which warehouses to keep for a given road distance, round by round, with the area each kept warehouse reaches by road. |
 | Walkthrough | Step through every decision of each algorithm on the current map. |
 | Data | The full point set with zones, banks and distances; CSV download. |
 | How it works | The algorithms, the OSM pipeline, scope and limits. |
@@ -102,7 +104,7 @@ pytest tests/ -v
 - `src/voronoi.py`: nearest-warehouse assignment and service zones clipped to the study area
 - `src/set_cover.py`: greedy set cover (optional extension), ln n approximation
 - `src/river.py`: river banks, trips via bridges/ferries, the river check
-- `src/roads.py`: the OSM road graph, Dijkstra, snapping places to roads, and the route planner (Held-Karp, nearest neighbour + 2-opt)
+- `src/roads.py`: the OSM road graph, Dijkstra, snapping places to roads, Voronoi zones by road distance, and the route planner (Held-Karp, nearest neighbour + 2-opt)
 - `src/traces.py`: instrumented copies of the algorithms for the Walkthrough page
 - `src/geo.py`: study area, places, river, crossings, and the lat/lon → flat km projection
 - `src/data.py`: random sampling of real places, CSV import/export

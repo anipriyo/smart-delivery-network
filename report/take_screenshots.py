@@ -5,7 +5,7 @@ protocol at desktop width (1440 px) in the light theme, and saves PNGs into
 report/screenshots/. The browser runs with its own throwaway profile and is
 closed again at the end.
 
-1. Start the app (it must use the defaults: seed 42, 5 warehouses, 80 customers):
+1. Start the app (it must use the defaults: seed 42, 5 warehouses, 150 customers, two-wheeler):
        ~/.venvs/analysis/bin/streamlit run app.py
 2. From the project root:
        ~/.venvs/analysis/bin/python report/take_screenshots.py
@@ -40,10 +40,11 @@ BROWSERS = [
 # (file name, page path, JavaScript to run once the page is ready, or None)
 SHOTS = [
     ("network_map.png", "/", None),
+    ("route_planner.png", "/route", None),  # opening example: Medicines to 5 random stops
     ("river_crossing.png", "/river", None),  # default mode: delivery van, road bridges only
     ("coverage_planner.png", "/coverage", None),
     # KD-tree search walkthrough, final step: the default search area, which stops
-    # were visited and which subtrees were skipped.
+    # were visited and which subtrees were skipped, beside the highlighted pseudocode.
     ("walkthrough_kdtree_search.png", "/walkthrough",
      "[...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'KD-tree search').click()"),
 ]

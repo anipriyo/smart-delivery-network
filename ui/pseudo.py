@@ -99,36 +99,42 @@ ALGOS: dict[str, dict] = {
     },
     "voronoi": {
         "words": [
-            "A warehouse's Voronoi cell is every spot closer to it than to any other warehouse.",
-            "To find a customer's zone, compare its distance to every warehouse and keep the nearest. That warehouse's "
-            "cell is the one the customer lies in.",
-            "The cells drawn on the map come from scipy (Qhull) and are clipped to the study area.",
-            "In the app the same rule runs on road distance (one Dijkstra per warehouse), so the river and the road "
-            "layout are respected. The walkthrough shows the straight-line version.",
+            "A warehouse's Voronoi cell is every spot that is closer to it than to any other warehouse. Here "
+            "closer means along the roads, so the river and the road layout are respected (a network Voronoi "
+            "diagram).",
+            "Run Dijkstra once from every warehouse over the OpenStreetMap road graph. That gives the road "
+            "distance from each warehouse to every road point.",
+            "To find a customer's zone, compare its road distance to every warehouse and keep the nearest.",
+            "To draw the zones, cover the area with 150 m squares, give each square to the warehouse nearest by "
+            "road, and merge the squares of each warehouse into one shape.",
         ],
         "code": [
             "Assign(customer c, warehouses W):",
             "  best ← none;  bestDist ← ∞",
             "  for each warehouse w in W:",
-            "    d ← distance(c, w)        ▷ by road in the app",
+            "    d ← road distance from w to c   ▷ Dijkstra from w",
             "    if d < bestDist: best ← w;  bestDist ← d",
             "  return best                 ▷ c lies in best's cell",
             "ServiceZones(W):",
-            "  cells ← Voronoi diagram of W   ▷ Qhull, O(m log m)",
-            "  clip every cell to the study area",
+            "  for each warehouse w: D[w] ← Dijkstra(w) over the roads",
+            "  for each 150 m square s of the area:",
+            "    owner(s) ← the w with the smallest D[w] at s's road point",
+            "  merge the squares of each owner into its zone",
         ],
-        "cost": "O(m) per customer for m warehouses; the diagram itself O(m log m)",
+        "cost": "Dijkstra O(E log V) per warehouse, then O(m) per customer or square",
     },
     "cover": {
         "words": [
-            "Each warehouse covers the customers it can reach within the chosen distance along the roads.",
+            "Each warehouse covers the customers it can reach within the chosen distance along the roads "
+            "(the same Dijkstra distances as the Voronoi zones).",
             "Round by round, keep the warehouse that covers the most customers not yet covered.",
-            "Stop when everyone is covered, or when no warehouse adds anybody new (the rest are out of reach).",
+            "Stop when everyone is covered, or when no warehouse adds anybody new (the rest are out of reach). "
+            "The map shades the part of the area each kept warehouse reaches by road.",
             "Finding the true minimum is NP-hard. Greedy is at most about ln n times the minimum.",
         ],
         "code": [
             "GreedyCover(customers U, sites S, distance r):",
-            "  for each site s: cover(s) ← customers within r of s",
+            "  for each site s: cover(s) ← customers within r of s by road",
             "  covered ← ∅;  chosen ← []",
             "  while covered ≠ U:",
             "    s ← the site with the most customers in cover(s) − covered",

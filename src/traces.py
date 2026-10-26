@@ -209,12 +209,16 @@ def kdtree_query_trace(
     return found, steps
 
 
-def voronoi_assignment_trace(customer: Point, warehouses: list[Point]) -> list[dict]:
-    """Compare the customer with each warehouse in turn, keeping the nearest so far."""
+def voronoi_assignment_trace(customer: Point, warehouses: list[Point],
+                             distances: list[float] | None = None) -> list[dict]:
+    """Compare the customer with each warehouse in turn, keeping the nearest so far.
+
+    ``distances`` (one per warehouse, e.g. by road) replaces the straight line when given.
+    """
     rows: list[dict] = []
     best: tuple[int, float] | None = None
-    for w in warehouses:
-        d = math.hypot(w.x - customer.x, w.y - customer.y)
+    for k, w in enumerate(warehouses):
+        d = math.hypot(w.x - customer.x, w.y - customer.y) if distances is None else float(distances[k])
         if best is None or d < best[1]:
             best = (w.id, d)
         rows.append({"warehouse": w.id, "distance": d, "best_so_far": best[0], "best_distance": best[1]})

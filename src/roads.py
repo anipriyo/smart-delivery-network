@@ -24,9 +24,11 @@ from itertools import permutations
 from pathlib import Path
 
 import numpy as np
+import shapely
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.spatial import cKDTree
+from shapely.geometry import Polygon
 
 from .geo import LocalProjection
 from .river import Crossing
@@ -121,6 +123,7 @@ class RoadGraph:
         self._edge_name = {}
         for a, b, nm in zip(u.tolist(), v.tolist(), self.edge_name.tolist()):
             self._edge_name[(a, b) if a < b else (b, a)] = nm
+        self._ferry_name = {(min(a, b), max(a, b)): f"{name} (ferry)" for a, b, name in self.ferries}
 
     # -------------------------------------------------------------- basics
 
@@ -150,33 +153,73 @@ class RoadGraph:
         """Names of the roads a path follows, in order, without repeats."""
         out: list[str] = []
         for a, b in zip(nodes, nodes[1:]):
-            nm = self._edge_name.get((a, b) if a < b else (b, a), 0)
-            name = self.names[nm] if nm else ""
+            key = (a, b) if a < b else (b, a)
+            nm = self._edge_name.get(key, 0)
+            name = self._ferry_name.get(key) or (self.names[nm] if nm else "")
             if name and (not out or out[-1] != name):
                 out.append(name)
         return out
 
-    MAJOR = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary",
-             "secondary_link", "tertiary", "tertiary_link", "unclassified"}
-
-    def major_runs(self) -> list[np.ndarray]:
-        """Main-road edges grouped into chains (consecutive edges of one way), for drawing."""
-        if getattr(self, "_runs", None) is None:
-            major = np.array([self.classes[c] in self.MAJOR for c in self.edge_cls])
-            idx = np.nonzero(major)[0]
-            runs, cur = [], [idx[0]] if len(idx) else []
-            for a, b in zip(idx[:-1], idx[1:]):
-                if b == a + 1 and self.v[a] == self.u[b] and self.edge_cls[a] == self.edge_cls[b]:
-                    cur.append(b)
-                else:
-                    runs.append(np.array(cur)); cur = [b]
-            if cur:
-                runs.append(np.array(cur))
-            self._runs = runs
-        return self._runs
-
     def coords(self, nodes: list[int]) -> list[list[float]]:
         return [[float(self.lon[i]), float(self.lat[i])] for i in nodes]
+
+
+# ------------------------------------------------------------------ zones by road distance
+
+@dataclass
+class AreaGrid:
+    """Square cells covering an area, each tied to its nearest road node."""
+
+    x0: float
+    y0: float
+    cell: float  # km
+    col: np.ndarray
+    row: np.ndarray
+    node: np.ndarray  # nearest road node of each cell centre
+    gap: np.ndarray  # km from the cell centre to that node
+
+
+def area_grid(g: RoadGraph, area: Polygon, cell: float = 0.15) -> AreaGrid:
+    x0, y0, x1, y1 = area.bounds
+    col, row = np.meshgrid(np.arange(math.ceil((x1 - x0) / cell)), np.arange(math.ceil((y1 - y0) / cell)))
+    col, row = col.ravel(), row.ravel()
+    xs, ys = x0 + (col + 0.5) * cell, y0 + (row + 0.5) * cell
+    keep = shapely.contains_xy(area.buffer(cell), xs, ys)
+    node, gap = g.snap(xs[keep], ys[keep])
+    return AreaGrid(x0, y0, cell, col[keep], row[keep], node, gap)
+
+
+def grid_km(g: RoadGraph, grid: AreaGrid, hub_km: np.ndarray, hub_gaps: np.ndarray) -> np.ndarray:
+    """(warehouses x cells) road distance from each warehouse to each cell centre."""
+    return hub_km[:, grid.node] + grid.gap[None, :] + np.asarray(hub_gaps)[:, None]
+
+
+def zone_polygons(grid: AreaGrid, owner: np.ndarray, area: Polygon) -> dict[int, Polygon]:
+    """Merge the cells of each owner (-1 = nobody) into one polygon, clipped to ``area``.
+
+    Cells are first joined into runs along each row, so the union only has to
+    merge a few hundred rectangles per zone; the staircase borders are then
+    smoothed together (coverage simplification).
+    """
+    keys, parts = [], []
+    for o in np.unique(owner[owner >= 0]):
+        sel = owner == o
+        c, r = grid.col[sel], grid.row[sel]
+        order = np.lexsort((c, r))
+        c, r = c[order], r[order]
+        start = np.r_[True, (r[1:] != r[:-1]) | (c[1:] != c[:-1] + 1)]
+        first = np.nonzero(start)[0]
+        last = np.r_[first[1:], len(c)] - 1
+        boxes = shapely.box(grid.x0 + c[first] * grid.cell, grid.y0 + r[first] * grid.cell,
+                            grid.x0 + (c[last] + 1) * grid.cell, grid.y0 + (r[first] + 1) * grid.cell)
+        keys.append(int(o))
+        parts.append(shapely.union_all(boxes))
+    if not parts:
+        return {}
+    # simplify the shared borders together, so neighbouring zones neither overlap nor leave gaps
+    smooth = shapely.coverage_simplify(np.array(parts), grid.cell * 0.5)
+    out = {k: z.intersection(area) for k, z in zip(keys, smooth)}
+    return {k: z for k, z in out.items() if not z.is_empty}
 
 
 # ------------------------------------------------------------------ visiting order

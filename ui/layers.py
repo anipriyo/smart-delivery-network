@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pydeck as pdk
 from shapely.geometry import MultiPolygon, Polygon
 
@@ -343,28 +342,6 @@ def circles(net: Network, centres: list[tuple[Point, str]], radius_km: float, la
 
 
 # ------------------------------------------------------------------ roads
-
-def road_lines(g, owner: np.ndarray, colour_of_owner: dict[int, str], layer_id: str = "road-zones",
-               width: float = 2.4, alpha: int = 215) -> pdk.Layer | None:
-    """Main roads coloured by ``owner[node]`` (-1 = not drawn), split wherever the owner changes."""
-    data = []
-    for run in g.major_runs():
-        nodes = np.r_[g.u[run[0]], g.v[run]]
-        own = owner[nodes]
-        start = 0
-        for i in range(1, len(nodes) + 1):
-            if i == len(nodes) or own[i] != own[start]:
-                o = int(own[start])
-                seg = nodes[start:i + 1] if i < len(nodes) else nodes[start:i]
-                if o >= 0 and len(seg) >= 2:
-                    data.append({"path": [[round(float(g.lon[n]), 5), round(float(g.lat[n]), 5)] for n in seg],
-                                 "colour": rgb(colour_of_owner[o], alpha)})
-                start = i
-    if not data:
-        return None
-    return pdk.Layer("PathLayer", id=layer_id, data=data, get_path="path", get_color="colour", width_units=PX,
-                     get_width=width, joint_rounded=True, cap_rounded=True, pickable=False)
-
 
 def lonlat_paths(paths: list[dict], layer_id: str, width: float = 4, dashed: bool = False) -> pdk.Layer | None:
     """paths: dicts with 'path' ([[lon, lat], ...]), 'colour' (hex), optional 'alpha' and 'tip' tuple."""

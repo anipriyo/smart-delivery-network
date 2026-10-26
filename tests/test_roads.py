@@ -5,17 +5,21 @@ import random
 
 import numpy as np
 import pytest
+from shapely.geometry import Point as Point_
 
 from src.data import sample_network
 from src.geo import latest_data_dir, load_region
 from src.roads import (
     RoadGraph,
+    area_grid,
     best_order,
     brute_force_order,
+    grid_km,
     held_karp,
     nearest_neighbour_2opt,
     plan_route,
     tour_cost,
+    zone_polygons,
 )
 
 
@@ -99,3 +103,19 @@ def test_vans_cannot_take_the_ferry(world):
     bike = g.from_sources([a], "bike", "km")[0, b]
     van = g.from_sources([a], "van", "km")[0, b]
     assert bike < 2 and van > bike  # the van has to go round by the bridge
+
+
+def test_zones_by_road_partition_the_area_and_hold_their_warehouse(world):
+    region, g = world
+    net = sample_network(region, 5, 60, seed=42)
+    wn, wg = g.snap([w.x for w in net.warehouses], [w.y for w in net.warehouses])
+    grid = area_grid(g, net.region)
+    km = grid_km(g, grid, g.from_sources(wn, "van", "km"), wg)
+    zones = zone_polygons(grid, np.argmin(km, axis=0), net.region)
+    assert sorted(zones) == list(range(5))
+    assert math.isclose(sum(z.area for z in zones.values()), net.region.area, rel_tol=1e-6)
+    for i, a in zones.items():
+        assert a.contains(Point_(net.warehouses[i].x, net.warehouses[i].y))
+        for j, b in zones.items():
+            if i < j:
+                assert a.intersection(b).area < 1e-6
